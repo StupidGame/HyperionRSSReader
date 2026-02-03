@@ -1,53 +1,94 @@
 package io.github.stupidgame.hyperionrssreader
 
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.text.Html
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.OneTimeWorkRequest
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
+import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 import io.github.stupidgame.hyperionrssreader.data.local.RssDatabase
+import io.github.stupidgame.hyperionrssreader.data.remote.RssCandidate
 import io.github.stupidgame.hyperionrssreader.data.remote.RssFeed
 import io.github.stupidgame.hyperionrssreader.data.remote.RssFeedParser
 import io.github.stupidgame.hyperionrssreader.data.remote.RssFeedService
 import io.github.stupidgame.hyperionrssreader.data.repository.AppTheme
+import io.github.stupidgame.hyperionrssreader.data.repository.NotificationHelper
 import io.github.stupidgame.hyperionrssreader.data.repository.RssRepository
 import io.github.stupidgame.hyperionrssreader.data.repository.SettingsRepository
+import io.github.stupidgame.hyperionrssreader.ui.home.FeedFilter
 import io.github.stupidgame.hyperionrssreader.ui.home.HomeViewModel
 import io.github.stupidgame.hyperionrssreader.ui.theme.HyperionRSSReaderTheme
-import okhttp3.OkHttpClient
+import io.github.stupidgame.hyperionrssreader.worker.RssUpdateWorker
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import java.util.TimeZone
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        val workRequest = PeriodicWorkRequestBuilder<RssUpdateWorker>(15, TimeUnit.MINUTES)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "rss_update_work",
+            ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
+
+        val oneTimeRequest = OneTimeWorkRequest.Builder(RssUpdateWorker::class.java).build()
+        WorkManager.getInstance(this).enqueue(oneTimeRequest)
+        
         setContent {
             val context = LocalContext.current
             val database = RssDatabase.getDatabase(context)
             val okHttpClient = OkHttpClient.Builder().build()
             val rssFeedParser = RssFeedParser()
             val rssFeedService = RssFeedService(okHttpClient, rssFeedParser)
-            val repository = RssRepository(database.rssDao(), rssFeedService)
+            val notificationHelper = remember { NotificationHelper(context) }
+            val repository = RssRepository(database.rssDao(), rssFeedService, notificationHelper)
             val settingsRepository = SettingsRepository(context)
             
             val homeViewModel: HomeViewModel = viewModel(
@@ -55,18 +96,40 @@ class MainActivity : ComponentActivity() {
                     override fun <T : ViewModel> create(modelClass: Class<T>): T {
                         if (modelClass.isAssignableFrom(HomeViewModel::class.java)) {
                             @Suppress("UNCHECKED_CAST")
-                            return HomeViewModel(repository, settingsRepository) as T
+                            return HomeViewModel(repository, settingsRepository, notificationHelper) as T
                         }
                         throw IllegalArgumentException("Unknown ViewModel class")
                     }
                 }
             )
 
+            val permissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { }
+
+            LaunchedEffect(Unit) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    if (ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            }
+
             val currentTheme by homeViewModel.currentTheme.collectAsState()
             val darkTheme = when (currentTheme) {
                 AppTheme.LIGHT -> false
                 AppTheme.DARK -> true
                 AppTheme.SYSTEM -> isSystemInDarkTheme()
+            }
+
+            LaunchedEffect(Unit) {
+                val feeds = repository.getAllFeedsSync()
+                val folders = repository.getAllFoldersSync()
+                repository.createNotificationChannelsForExistingData(feeds, folders)
             }
 
             HyperionRSSReaderTheme(darkTheme = darkTheme) {
@@ -83,61 +146,138 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     val folders by homeViewModel.folders.collectAsState()
     val currentFeedContent by homeViewModel.currentFeedContent.collectAsState()
     val foundFeed by homeViewModel.foundFeed.collectAsState()
+    val targetUrl by homeViewModel.targetUrl.collectAsState()
+    val rssCandidates by homeViewModel.rssCandidates.collectAsState()
     val isLoading by homeViewModel.isLoading.collectAsState()
+    val isRefreshing by homeViewModel.isRefreshing.collectAsState()
     val error by homeViewModel.error.collectAsState()
+    val currentFilter by homeViewModel.currentFilter.collectAsState()
+    val currentTimeZoneId by homeViewModel.currentTimeZoneId.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
-    var showThemeDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    
+    // 編集・削除用
+    var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
+    var feedToDelete by remember { mutableStateOf<FeedEntity?>(null) }
+    var folderToEdit by remember { mutableStateOf<FolderEntity?>(null) }
     
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    val pullRefreshState = rememberPullToRefreshState()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                Spacer(Modifier.height(12.dp))
-                Text("Folders", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
-                HorizontalDivider()
-                
-                // 全てのフィード（未分類）
-                NavigationDrawerItem(
-                    label = { Text("Uncategorized") },
-                    selected = false,
-                    onClick = { /* TODO: Filter by uncategorized */ },
-                    icon = { Icon(Icons.Filled.List, contentDescription = null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-
-                // フォルダ一覧
-                folders.forEach { folder ->
-                    NavigationDrawerItem(
-                        label = { Text(folder.name) },
-                        selected = false,
-                        onClick = { /* TODO: Filter by folder */ },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                    )
-                }
-                
-                HorizontalDivider()
-                NavigationDrawerItem(
-                    label = { Text("Settings (Theme)") },
-                    selected = false,
-                    onClick = { showThemeDialog = true },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-                
-                Spacer(modifier = Modifier.weight(1f))
-                
-                TextButton(
-                    onClick = { showAddFolderDialog = true },
-                    modifier = Modifier.fillMaxWidth().padding(16.dp)
+                LazyColumn(
+                    modifier = Modifier.fillMaxHeight(),
+                    contentPadding = PaddingValues(16.dp)
                 ) {
-                    Text("Create New Folder")
+                    item {
+                        Text("Folders", style = MaterialTheme.typography.titleMedium)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                    
+                    item {
+                        NavigationDrawerItem(
+                            label = { Text("All Feeds") },
+                            selected = currentFilter is FeedFilter.All,
+                            onClick = { 
+                                homeViewModel.setFilter(FeedFilter.All)
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+                    
+                    item {
+                        NavigationDrawerItem(
+                            label = { Text("Uncategorized") },
+                            selected = currentFilter is FeedFilter.Uncategorized,
+                            onClick = { 
+                                homeViewModel.setFilter(FeedFilter.Uncategorized) 
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+
+                    items(folders) { folder ->
+                        NavigationDrawerItem(
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(folder.name, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { folderToEdit = folder }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            },
+                            selected = currentFilter is FeedFilter.Folder && (currentFilter as FeedFilter.Folder).id == folder.id,
+                            onClick = { 
+                                homeViewModel.setFilter(FeedFilter.Folder(folder.id))
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+                    
+                    item {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        Text("Feeds", style = MaterialTheme.typography.titleMedium)
+                    }
+                    
+                    items(savedFeeds) { feed ->
+                        NavigationDrawerItem(
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(decodeHtml(feed.title), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(feed.url, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(onClick = { feedToEdit = feed }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
+                                    IconButton(onClick = { feedToDelete = feed }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            },
+                            selected = false,
+                            onClick = { 
+                                homeViewModel.selectFeed(feed) 
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+                    
+                    item {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        NavigationDrawerItem(
+                            label = { Text("Settings") }, 
+                            selected = false,
+                            onClick = { showSettingsDialog = true },
+                            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+                    
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TextButton(
+                            onClick = { showAddFolderDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Create New Folder")
+                        }
+                    }
                 }
             }
         }
@@ -145,7 +285,17 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Hyperion RSS") },
+                    title = { 
+                        Text(when(currentFilter) {
+                            FeedFilter.All -> "Hyperion RSS (All)"
+                            FeedFilter.Uncategorized -> "Hyperion RSS (Uncategorized)"
+                            is FeedFilter.Folder -> {
+                                val folderId = (currentFilter as FeedFilter.Folder).id
+                                val folderName = folders.find { it.id == folderId }?.name ?: "Folder"
+                                "Hyperion RSS ($folderName)"
+                            }
+                        }) 
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Filled.Menu, contentDescription = "Menu")
@@ -161,46 +311,67 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             modifier = Modifier.fillMaxSize()
         ) { innerPadding ->
             Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-                // Horizontal list of feeds (Quick Access)
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp)
+                        .height(140.dp)
                 ) {
                     items(savedFeeds) { feed ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
-                                .clickable { homeViewModel.selectFeed(feed.url) },
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onLongPress = { feedToDelete = feed },
+                                        onTap = { homeViewModel.selectFeed(feed) }
+                                    )
+                                },
                         ) {
-                            Text(
-                                text = feed.title,
-                                modifier = Modifier.padding(8.dp),
-                                maxLines = 2,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(
+                                    text = decodeHtml(feed.title),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = feed.url,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
                 
                 HorizontalDivider()
 
-                // Feed Content Area
-                Box(modifier = Modifier.fillMaxSize()) {
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                    } else if (currentFeedContent != null) {
-                        FeedContent(
-                            rssFeed = currentFeedContent!!,
-                            onItemClick = { url ->
-                                try {
-                                    uriHandler.openUri(url)
-                                } catch (e: Exception) {
-                                    // Ignore or show error
+                Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                    if (currentFeedContent != null) {
+                        PullToRefreshBox(
+                            isRefreshing = isRefreshing,
+                            onRefresh = { homeViewModel.refreshCurrentFeed() },
+                            state = pullRefreshState,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            FeedContent(
+                                rssFeed = currentFeedContent!!,
+                                timeZoneId = currentTimeZoneId,
+                                formatDate = { date, tz -> homeViewModel.formatDate(date, tz) },
+                                onItemClick = { url ->
+                                    try {
+                                        uriHandler.openUri(url)
+                                    } catch (e: Exception) {
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
+                    } else if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     } else {
                         Text(
                             text = "Select a feed to view",
@@ -212,7 +383,6 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         }
     }
 
-    // エラーダイアログ
     if (error != null) {
         AlertDialog(
             onDismissRequest = { homeViewModel.clearError() },
@@ -225,8 +395,54 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
+    
+    // 編集ダイアログ（フィード）
+    if (feedToEdit != null) {
+        EditTitleDialog(
+            title = "Edit Feed Title",
+            initialValue = decodeHtml(feedToEdit!!.title),
+            onDismiss = { feedToEdit = null },
+            onConfirm = { newTitle ->
+                homeViewModel.updateFeedTitle(feedToEdit!!, newTitle)
+                feedToEdit = null
+            }
+        )
+    }
+    
+    // 編集ダイアログ（フォルダ）
+    if (folderToEdit != null) {
+        EditTitleDialog(
+            title = "Edit Folder Name",
+            initialValue = folderToEdit!!.name,
+            onDismiss = { folderToEdit = null },
+            onConfirm = { newName ->
+                homeViewModel.updateFolderName(folderToEdit!!, newName)
+                folderToEdit = null
+            }
+        )
+    }
+    
+    if (feedToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { feedToDelete = null },
+            title = { Text("Delete Feed?") },
+            text = { Text("Are you sure you want to delete '${decodeHtml(feedToDelete?.title ?: "")}'?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    feedToDelete?.let { homeViewModel.deleteFeed(it) }
+                    feedToDelete = null
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { feedToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
-    // URL入力ダイアログ
     if (showAddDialog) {
         AddFeedDialog(
             onDismiss = { showAddDialog = false },
@@ -237,10 +453,22 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
     
-    // フィード確認ダイアログ
+    if (rssCandidates.isNotEmpty()) {
+        SelectCandidateDialog(
+            candidates = rssCandidates,
+            onSelect = { candidate ->
+                homeViewModel.selectCandidate(candidate)
+            },
+            onCancel = {
+                homeViewModel.cancelSelectCandidate()
+            }
+        )
+    }
+    
     if (foundFeed != null) {
         ConfirmFeedDialog(
             feed = foundFeed!!,
+            targetUrl = targetUrl,
             folders = folders,
             onConfirm = { folderId ->
                 homeViewModel.confirmAddFeed(folderId)
@@ -251,7 +479,6 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
     
-    // フォルダ追加ダイアログ
     if (showAddFolderDialog) {
         AddFolderDialog(
             onDismiss = { showAddFolderDialog = false },
@@ -262,49 +489,164 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
     
-    // テーマ選択ダイアログ
-    if (showThemeDialog) {
-        ThemeSelectionDialog(
-            onDismiss = { showThemeDialog = false },
+    if (showSettingsDialog) {
+        SettingsDialog(
+            onDismiss = { showSettingsDialog = false },
+            currentTimeZoneId = currentTimeZoneId,
             onThemeSelected = { theme ->
                 homeViewModel.setTheme(theme)
-                showThemeDialog = false
+            },
+            onTimeZoneSelected = { timeZoneId ->
+                homeViewModel.setTimeZone(timeZoneId)
+            },
+            onOpenNotificationSettings = {
+                homeViewModel.openAppNotificationSettings()
             }
         )
     }
 }
 
 @Composable
-fun ThemeSelectionDialog(onDismiss: () -> Unit, onThemeSelected: (AppTheme) -> Unit) {
+fun EditTitleDialog(
+    title: String,
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select Theme") },
+        title = { Text(title) },
+        text = {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+// ... (Other Dialogs remain the same) ...
+@Composable
+fun SelectCandidateDialog(
+    candidates: List<RssCandidate>,
+    onSelect: (RssCandidate) -> Unit,
+    onCancel: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Select RSS Feed") },
         text = {
             Column {
-                TextButton(
-                    onClick = { onThemeSelected(AppTheme.LIGHT) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Light")
-                }
-                TextButton(
-                    onClick = { onThemeSelected(AppTheme.DARK) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Dark")
-                }
-                TextButton(
-                    onClick = { onThemeSelected(AppTheme.SYSTEM) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("System Default")
+                Text("Multiple feeds found. Please select one:")
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                    items(candidates) { candidate ->
+                        ListItem(
+                            headlineContent = { Text(decodeHtml(candidate.title)) },
+                            supportingContent = { Text(candidate.url, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            modifier = Modifier
+                                .clickable { onSelect(candidate) }
+                                .padding(vertical = 4.dp)
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onCancel) {
                 Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SettingsDialog(
+    onDismiss: () -> Unit,
+    currentTimeZoneId: String,
+    onThemeSelected: (AppTheme) -> Unit,
+    onTimeZoneSelected: (String) -> Unit,
+    onOpenNotificationSettings: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val availableTimeZones = remember { TimeZone.getAvailableIDs().toList().sorted() }
+    val commonTimeZones = listOf("UTC", "Asia/Tokyo", "America/New_York", "Europe/London", "Asia/Shanghai")
+    val displayTimeZones = (commonTimeZones + currentTimeZoneId).distinct().sorted()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Appearance", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { onThemeSelected(AppTheme.LIGHT) }) { Text("Light") }
+                    TextButton(onClick = { onThemeSelected(AppTheme.DARK) }) { Text("Dark") }
+                    TextButton(onClick = { onThemeSelected(AppTheme.SYSTEM) }) { Text("System") }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text("Time Zone", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Box {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(currentTimeZoneId)
+                        Icon(Icons.Filled.ArrowDropDown, "Select Time Zone")
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        displayTimeZones.forEach { id ->
+                            DropdownMenuItem(
+                                text = { Text(id) },
+                                onClick = {
+                                    onTimeZoneSelected(id)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text("Notifications", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { onOpenNotificationSettings() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Manage Notifications")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
             }
         }
     )
@@ -345,7 +687,8 @@ fun AddFeedDialog(onDismiss: () -> Unit, onVerify: (String) -> Unit) {
 @Composable
 fun ConfirmFeedDialog(
     feed: RssFeed,
-    folders: List<io.github.stupidgame.hyperionrssreader.data.local.FolderEntity>,
+    targetUrl: String, 
+    folders: List<FolderEntity>,
     onConfirm: (Int?) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -356,11 +699,12 @@ fun ConfirmFeedDialog(
         title = { Text("Subscribe to Feed?") },
         text = {
             Column {
-                Text("Title: ${feed.channel.title}", style = MaterialTheme.typography.titleMedium)
+                Text("Title: ${decodeHtml(feed.channel.title)}", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("URL: ${feed.url}", style = MaterialTheme.typography.bodySmall)
+                Text("Source URL: ${feed.url}", style = MaterialTheme.typography.bodySmall)
+                Text("Register as: $targetUrl", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(feed.channel.description, maxLines = 3, style = MaterialTheme.typography.bodyMedium)
+                Text(decodeHtml(feed.channel.description), maxLines = 3, style = MaterialTheme.typography.bodyMedium)
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Select Folder (Optional):")
@@ -423,15 +767,22 @@ fun AddFolderDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 }
 
 @Composable
-fun FeedContent(rssFeed: RssFeed, onItemClick: (String) -> Unit, modifier: Modifier = Modifier) {
+fun FeedContent(
+    rssFeed: RssFeed, 
+    timeZoneId: String,
+    formatDate: (String, String) -> String,
+    onItemClick: (String) -> Unit, 
+    modifier: Modifier = Modifier
+) {
     Column(modifier = modifier.padding(16.dp)) {
-        Text(text = rssFeed.channel.title, style = MaterialTheme.typography.headlineMedium)
+        Text(text = decodeHtml(rssFeed.channel.title), style = MaterialTheme.typography.headlineMedium)
         
         LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
             items(rssFeed.channel.items) { item ->
+                val formattedDate = formatDate(item.pubDate, timeZoneId)
                 ListItem(
-                    headlineContent = { Text(item.title) },
-                    supportingContent = { Text(item.pubDate) },
+                    headlineContent = { Text(decodeHtml(item.title)) },
+                    supportingContent = { Text(formattedDate) }, // Display formatted date
                     modifier = Modifier
                         .clickable { onItemClick(item.link) }
                         .padding(vertical = 4.dp)
@@ -440,4 +791,8 @@ fun FeedContent(rssFeed: RssFeed, onItemClick: (String) -> Unit, modifier: Modif
             }
         }
     }
+}
+
+fun decodeHtml(text: String): String {
+    return Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY).toString()
 }
