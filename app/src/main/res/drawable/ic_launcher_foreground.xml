@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Dot (Makina Pink) -->
+    <path
+        android:fillColor="#FF4081"
+        android:pathData="M38,70m-7,0a7,7 0 1,1 14,0a7,7 0 1,1 -14,0"/>
+
+    <!-- Inner Wave (Reina Green Light) -->
+    <path
+        android:fillColor="#B2FF59"
+        android:pathData="M31,48v8c7.7,0 14,6.3 14,14h8c0,-12.1 -9.9,-22 -22,-22z"/>
+
+    <!-- Outer Wave (Reina Green Dark) -->
+    <path
+        android:fillColor="#64DD17"
+        android:pathData="M31,32v8c16.6,0 30,13.4 30,30h8c0,-21 -17,-38 -38,-38z"/>
+
+    <!-- Hyperion H motif (Mechanic Grey) -->
+    <path
+        android:fillColor="#90A4AE"
+        android:pathData="M70,30h8v48h-8z M70,50h20v8h-20z M90,30h8v48h-8z"/>
+
+</vector>
