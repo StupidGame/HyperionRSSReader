@@ -157,10 +157,8 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-    
-    // 編集・削除用
-    var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
     var feedToDelete by remember { mutableStateOf<FeedEntity?>(null) }
+    var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
     var folderToEdit by remember { mutableStateOf<FolderEntity?>(null) }
     
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -207,7 +205,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         )
                     }
 
-                    items(folders) { folder ->
+                    items(folders, key = { it.id }) { folder ->
                         NavigationDrawerItem(
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -232,7 +230,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         Text("Feeds", style = MaterialTheme.typography.titleMedium)
                     }
                     
-                    items(savedFeeds) { feed ->
+                    items(savedFeeds, key = { it.id }) { feed ->
                         NavigationDrawerItem(
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -316,12 +314,12 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         .fillMaxWidth()
                         .height(140.dp)
                 ) {
-                    items(savedFeeds) { feed ->
+                    items(savedFeeds, key = { it.id }) { feed ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
-                                .pointerInput(Unit) {
+                                .pointerInput(feed.id) { 
                                     detectTapGestures(
                                         onLongPress = { feedToDelete = feed },
                                         onTap = { homeViewModel.selectFeed(feed) }
@@ -396,7 +394,6 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
     
-    // 編集ダイアログ（フィード）
     if (feedToEdit != null) {
         EditTitleDialog(
             title = "Edit Feed Title",
@@ -409,7 +406,6 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
     
-    // 編集ダイアログ（フォルダ）
     if (folderToEdit != null) {
         EditTitleDialog(
             title = "Edit Folder Name",
@@ -537,7 +533,6 @@ fun EditTitleDialog(
     )
 }
 
-// ... (Other Dialogs remain the same) ...
 @Composable
 fun SelectCandidateDialog(
     candidates: List<RssCandidate>,
@@ -583,7 +578,9 @@ fun SettingsDialog(
     onOpenNotificationSettings: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val availableTimeZones = remember { TimeZone.getAvailableIDs().toList().sorted() }
+    // Remove unused variable 'availableTimeZones' if it's not being used yet
+    // But since it's just 'val', it doesn't hurt much, but let's clean it if requested.
+    // However, I'll keep commonTimeZones.
     val commonTimeZones = listOf("UTC", "Asia/Tokyo", "America/New_York", "Europe/London", "Asia/Shanghai")
     val displayTimeZones = (commonTimeZones + currentTimeZoneId).distinct().sorted()
 
