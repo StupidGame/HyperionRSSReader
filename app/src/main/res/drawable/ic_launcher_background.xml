@@ -5,11 +5,6 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#263238"
+        android:fillColor="#FFFFFF"
         android:pathData="M0,0h108v108h-108z"/>
-    <!-- Cyber grid lines -->
-    <path
-        android:strokeColor="#37474F"
-        android:strokeWidth="1"
-        android:pathData="M18,0v108 M36,0v108 M54,0v108 M72,0v108 M90,0v108 M0,18h108 M0,36h108 M0,54h108 M0,72h108 M0,90h108"/>
 </vector>

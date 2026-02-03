@@ -12,11 +12,17 @@ interface RssDao {
     @Query("SELECT * FROM feeds")
     fun getAllFeeds(): Flow<List<FeedEntity>>
 
+    @Query("SELECT * FROM feeds")
+    suspend fun getAllFeedsSync(): List<FeedEntity>
+
     @Query("SELECT * FROM folders")
     fun getAllFolders(): Flow<List<FolderEntity>>
+    
+    @Query("SELECT * FROM folders")
+    suspend fun getAllFoldersSync(): List<FolderEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertFeed(feed: FeedEntity)
+    suspend fun insertFeed(feed: FeedEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFolder(folder: FolderEntity): Long
@@ -32,4 +38,7 @@ interface RssDao {
     
     @Query("SELECT * FROM feeds WHERE folderId = :folderId")
     fun getFeedsInFolder(folderId: Int): Flow<List<FeedEntity>>
+    
+    @Query("SELECT * FROM feeds WHERE folderId = :folderId")
+    suspend fun getFeedsInFolderSync(folderId: Int): List<FeedEntity>
 }

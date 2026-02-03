@@ -1,5 +1,6 @@
 package io.github.stupidgame.hyperionrssreader.data.remote
 
+import android.text.Html
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.InputStream
@@ -55,13 +56,15 @@ class RssFeedParser {
                             inItem = true
                         }
                         "title" -> {
-                            if (inItem) title = parser.nextText() else if (channel != null) channel = channel.copy(title = parser.nextText())
+                            val text = decode(parser.nextText())
+                            if (inItem) title = text else if (channel != null) channel = channel.copy(title = text)
                         }
                         "link" -> {
                             if (inItem) link = parser.nextText() else if (channel != null) channel = channel.copy(link = parser.nextText())
                         }
                         "description" -> {
-                            if (inItem) description = parser.nextText() else if (channel != null) channel = channel.copy(description = parser.nextText())
+                            val text = decode(parser.nextText())
+                            if (inItem) description = text else if (channel != null) channel = channel.copy(description = text)
                         }
                         "pubDate" -> {
                             if (inItem) pubDate = parser.nextText()
@@ -90,5 +93,9 @@ class RssFeedParser {
         }
 
         return RssFeed(feedUrl, channel ?: throw IllegalStateException("RSS Channel not found"))
+    }
+    
+    private fun decode(text: String): String {
+        return Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY).toString()
     }
 }
