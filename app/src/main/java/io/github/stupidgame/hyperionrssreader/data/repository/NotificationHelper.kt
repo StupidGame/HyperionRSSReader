@@ -39,6 +39,34 @@ class NotificationHelper(private val context: Context) {
             notificationManager.createNotificationChannel(channel)
         }
     }
+    
+    fun deleteChannelForFeed(feedId: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = getFeedChannelId(feedId)
+            notificationManager.deleteNotificationChannel(channelId)
+        }
+    }
+    
+    fun deleteChannelForFolder(folderId: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = getFolderChannelId(folderId)
+            notificationManager.deleteNotificationChannel(channelId)
+        }
+    }
+    
+    fun updateChannelForFeed(feed: FeedEntity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Channel name update requires recreation with same ID but different name (actually just updates name)
+            // Or just create again.
+            createChannelForFeed(feed)
+        }
+    }
+    
+    fun updateChannelForFolder(folder: FolderEntity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            createChannelForFolder(folder)
+        }
+    }
 
     fun getFeedChannelId(feedId: Int) = "feed_$feedId"
     fun getFolderChannelId(folderId: Int) = "folder_$folderId"

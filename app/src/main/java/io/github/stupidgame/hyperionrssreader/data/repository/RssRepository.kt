@@ -61,18 +61,33 @@ class RssRepository(
     suspend fun updateFeed(feed: FeedEntity) {
         withContext(Dispatchers.IO) {
             rssDao.updateFeed(feed)
+            notificationHelper.updateChannelForFeed(feed)
         }
     }
     
     suspend fun updateFolder(folder: FolderEntity) {
         withContext(Dispatchers.IO) {
             rssDao.updateFolder(folder)
+            notificationHelper.updateChannelForFolder(folder)
         }
     }
     
     suspend fun deleteFeed(feed: FeedEntity) {
         withContext(Dispatchers.IO) {
             rssDao.deleteFeed(feed)
+            notificationHelper.deleteChannelForFeed(feed.id)
+        }
+    }
+    
+    suspend fun deleteFolder(folder: FolderEntity) {
+        withContext(Dispatchers.IO) {
+            // フォルダを消す前に、その中のフィードの扱いを決める必要があるが、
+            // 今回のDB設計ではCASCADEではなくSET NULLにしているので、
+            // フォルダ内のフィードは「未分類」になる（はず）。
+            // そのため、フィード自体の通知チャンネルは残るべきだが、
+            // フォルダ自体の通知チャンネルは削除する。
+            rssDao.deleteFolder(folder)
+            notificationHelper.deleteChannelForFolder(folder.id)
         }
     }
 
