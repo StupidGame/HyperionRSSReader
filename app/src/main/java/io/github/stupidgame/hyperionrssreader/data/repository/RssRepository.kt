@@ -59,7 +59,15 @@ class RssRepository(
     }
     
     suspend fun updateFeed(feed: FeedEntity) {
-        rssDao.insertFeed(feed)
+        withContext(Dispatchers.IO) {
+            rssDao.updateFeed(feed)
+        }
+    }
+    
+    suspend fun updateFolder(folder: FolderEntity) {
+        withContext(Dispatchers.IO) {
+            rssDao.updateFolder(folder)
+        }
     }
     
     suspend fun deleteFeed(feed: FeedEntity) {
@@ -88,19 +96,16 @@ class RssRepository(
         }
     }
     
-    // フォルダ内の全フィードを取得してマージする
     suspend fun fetchMergedFeedContent(folderId: Int): RssFeed {
         return withContext(Dispatchers.IO) {
             val feeds = getFeedsInFolderSync(folderId)
             
-            // 簡易的に "Folder Feeds" とする。
             val folderName = "Folder Feeds" 
 
             if (feeds.isEmpty()) {
                 return@withContext RssFeed("", RssChannel(folderName, "", "No feeds in this folder", emptyList()))
             }
             
-            // 並列で取得
             val deferredResults = feeds.map { feed ->
                 async {
                     try {
@@ -113,7 +118,6 @@ class RssRepository(
             
             val results = deferredResults.awaitAll().filterNotNull()
             
-            // アイテムをマージして日付順（新しい順）にソート
             val allItems = results.flatMap { it.channel.items }
                 .sortedByDescending { parsePubDate(it.pubDate) }
                 

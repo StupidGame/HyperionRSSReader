@@ -22,10 +22,13 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,7 +105,7 @@ class MainActivity : ComponentActivity() {
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
-            ) { isGranted -> }
+            ) { }
 
             LaunchedEffect(Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -146,6 +149,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     val targetUrl by homeViewModel.targetUrl.collectAsState()
     val rssCandidates by homeViewModel.rssCandidates.collectAsState()
     val isLoading by homeViewModel.isLoading.collectAsState()
+    val isRefreshing by homeViewModel.isRefreshing.collectAsState()
     val error by homeViewModel.error.collectAsState()
     val currentFilter by homeViewModel.currentFilter.collectAsState()
     val currentTimeZoneId by homeViewModel.currentTimeZoneId.collectAsState()
@@ -153,11 +157,16 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    
+    // 編集・削除用
+    var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
     var feedToDelete by remember { mutableStateOf<FeedEntity?>(null) }
+    var folderToEdit by remember { mutableStateOf<FolderEntity?>(null) }
     
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    val pullRefreshState = rememberPullToRefreshState()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -200,7 +209,14 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
 
                     items(folders) { folder ->
                         NavigationDrawerItem(
-                            label = { Text(folder.name) },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(folder.name, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { folderToEdit = folder }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            },
                             selected = currentFilter is FeedFilter.Folder && (currentFilter as FeedFilter.Folder).id == folder.id,
                             onClick = { 
                                 homeViewModel.setFilter(FeedFilter.Folder(folder.id))
@@ -224,8 +240,11 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                                         Text(decodeHtml(feed.title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(feed.url, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
+                                    IconButton(onClick = { feedToEdit = feed }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
                                     IconButton(onClick = { feedToDelete = feed }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                                     }
                                 }
                             },
@@ -332,20 +351,27 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                 HorizontalDivider()
 
                 Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                    } else if (currentFeedContent != null) {
-                        FeedContent(
-                            rssFeed = currentFeedContent!!,
-                            timeZoneId = currentTimeZoneId,
-                            formatDate = { date, tz -> homeViewModel.formatDate(date, tz) },
-                            onItemClick = { url ->
-                                try {
-                                    uriHandler.openUri(url)
-                                } catch (e: Exception) {
+                    if (currentFeedContent != null) {
+                        PullToRefreshBox(
+                            isRefreshing = isRefreshing,
+                            onRefresh = { homeViewModel.refreshCurrentFeed() },
+                            state = pullRefreshState,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            FeedContent(
+                                rssFeed = currentFeedContent!!,
+                                timeZoneId = currentTimeZoneId,
+                                formatDate = { date, tz -> homeViewModel.formatDate(date, tz) },
+                                onItemClick = { url ->
+                                    try {
+                                        uriHandler.openUri(url)
+                                    } catch (e: Exception) {
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
+                    } else if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     } else {
                         Text(
                             text = "Select a feed to view",
@@ -370,11 +396,37 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
     
+    // 編集ダイアログ（フィード）
+    if (feedToEdit != null) {
+        EditTitleDialog(
+            title = "Edit Feed Title",
+            initialValue = decodeHtml(feedToEdit!!.title),
+            onDismiss = { feedToEdit = null },
+            onConfirm = { newTitle ->
+                homeViewModel.updateFeedTitle(feedToEdit!!, newTitle)
+                feedToEdit = null
+            }
+        )
+    }
+    
+    // 編集ダイアログ（フォルダ）
+    if (folderToEdit != null) {
+        EditTitleDialog(
+            title = "Edit Folder Name",
+            initialValue = folderToEdit!!.name,
+            onDismiss = { folderToEdit = null },
+            onConfirm = { newName ->
+                homeViewModel.updateFolderName(folderToEdit!!, newName)
+                folderToEdit = null
+            }
+        )
+    }
+    
     if (feedToDelete != null) {
         AlertDialog(
             onDismissRequest = { feedToDelete = null },
             title = { Text("Delete Feed?") },
-            text = { Text("Are you sure you want to delete '${feedToDelete?.title}'?") },
+            text = { Text("Are you sure you want to delete '${decodeHtml(feedToDelete?.title ?: "")}'?") },
             confirmButton = {
                 TextButton(onClick = {
                     feedToDelete?.let { homeViewModel.deleteFeed(it) }
@@ -455,6 +507,38 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
 }
 
 @Composable
+fun EditTitleDialog(
+    title: String,
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initialValue) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+// ... (Other Dialogs remain the same) ...
+@Composable
 fun SelectCandidateDialog(
     candidates: List<RssCandidate>,
     onSelect: (RssCandidate) -> Unit,
@@ -485,6 +569,84 @@ fun SelectCandidateDialog(
         dismissButton = {
             TextButton(onClick = onCancel) {
                 Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SettingsDialog(
+    onDismiss: () -> Unit,
+    currentTimeZoneId: String,
+    onThemeSelected: (AppTheme) -> Unit,
+    onTimeZoneSelected: (String) -> Unit,
+    onOpenNotificationSettings: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val availableTimeZones = remember { TimeZone.getAvailableIDs().toList().sorted() }
+    val commonTimeZones = listOf("UTC", "Asia/Tokyo", "America/New_York", "Europe/London", "Asia/Shanghai")
+    val displayTimeZones = (commonTimeZones + currentTimeZoneId).distinct().sorted()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Appearance", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { onThemeSelected(AppTheme.LIGHT) }) { Text("Light") }
+                    TextButton(onClick = { onThemeSelected(AppTheme.DARK) }) { Text("Dark") }
+                    TextButton(onClick = { onThemeSelected(AppTheme.SYSTEM) }) { Text("System") }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text("Time Zone", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Box {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(currentTimeZoneId)
+                        Icon(Icons.Filled.ArrowDropDown, "Select Time Zone")
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        displayTimeZones.forEach { id ->
+                            DropdownMenuItem(
+                                text = { Text(id) },
+                                onClick = {
+                                    onTimeZoneSelected(id)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text("Notifications", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { onOpenNotificationSettings() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Manage Notifications")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
             }
         }
     )
@@ -599,85 +761,6 @@ fun AddFolderDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-fun SettingsDialog(
-    onDismiss: () -> Unit,
-    currentTimeZoneId: String,
-    onThemeSelected: (AppTheme) -> Unit,
-    onTimeZoneSelected: (String) -> Unit,
-    onOpenNotificationSettings: () -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val availableTimeZones = remember { TimeZone.getAvailableIDs().toList().sorted() }
-    
-    val commonTimeZones = listOf("UTC", "Asia/Tokyo", "America/New_York", "Europe/London", "Asia/Shanghai")
-    val displayTimeZones = (commonTimeZones + currentTimeZoneId).distinct().sorted()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Settings") },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("Appearance", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    TextButton(onClick = { onThemeSelected(AppTheme.LIGHT) }) { Text("Light") }
-                    TextButton(onClick = { onThemeSelected(AppTheme.DARK) }) { Text("Dark") }
-                    TextButton(onClick = { onThemeSelected(AppTheme.SYSTEM) }) { Text("System") }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text("Time Zone", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                Box {
-                    OutlinedButton(
-                        onClick = { expanded = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(currentTimeZoneId)
-                        Icon(Icons.Filled.ArrowDropDown, "Select Time Zone")
-                    }
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        displayTimeZones.forEach { id ->
-                            DropdownMenuItem(
-                                text = { Text(id) },
-                                onClick = {
-                                    onTimeZoneSelected(id)
-                                    expanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text("Notifications", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = { onOpenNotificationSettings() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Manage Notifications")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
             }
         }
     )
