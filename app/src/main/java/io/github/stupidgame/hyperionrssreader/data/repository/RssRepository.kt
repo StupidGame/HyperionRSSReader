@@ -54,17 +54,60 @@ class RssRepository(
             )
             val id = rssDao.insertFeed(entity)
             val savedEntity = entity.copy(id = id.toInt())
-            notificationHelper.createChannelForFeed(savedEntity)
+            
+            if (folderId == null) {
+                try {
+                    notificationHelper.createChannelForFeed(savedEntity)
+                } catch (e: Exception) {
+                    // Ignore notification channel creation errors
+                }
+            }
         }
     }
     
     suspend fun updateFeed(feed: FeedEntity) {
-        rssDao.insertFeed(feed)
+        withContext(Dispatchers.IO) {
+            rssDao.updateFeed(feed)
+            try {
+                if (feed.folderId == null) {
+                    notificationHelper.updateChannelForFeed(feed)
+                }
+            } catch (e: Exception) {
+                // Ignore notification channel update errors
+            }
+        }
+    }
+    
+    suspend fun updateFolder(folder: FolderEntity) {
+        withContext(Dispatchers.IO) {
+            rssDao.updateFolder(folder)
+            try {
+                notificationHelper.updateChannelForFolder(folder)
+            } catch (e: Exception) {
+                // Ignore notification channel update errors
+            }
+        }
     }
     
     suspend fun deleteFeed(feed: FeedEntity) {
         withContext(Dispatchers.IO) {
             rssDao.deleteFeed(feed)
+            try {
+                notificationHelper.deleteChannelForFeed(feed.id)
+            } catch (e: Exception) {
+                // Ignore notification channel deletion errors
+            }
+        }
+    }
+    
+    suspend fun deleteFolder(folder: FolderEntity) {
+        withContext(Dispatchers.IO) {
+            try {
+                notificationHelper.deleteChannelForFolder(folder.id)
+            } catch (e: Exception) {
+                // Ignore notification channel deletion errors
+            }
+            rssDao.deleteFolder(folder)
         }
     }
 
@@ -72,7 +115,11 @@ class RssRepository(
         withContext(Dispatchers.IO) {
             val id = rssDao.insertFolder(FolderEntity(name = name))
             val folder = FolderEntity(id = id.toInt(), name = name)
-            notificationHelper.createChannelForFolder(folder)
+            try {
+                notificationHelper.createChannelForFolder(folder)
+            } catch (e: Exception) {
+                // Ignore notification channel creation errors
+            }
         }
     }
     
@@ -88,19 +135,16 @@ class RssRepository(
         }
     }
     
-    // フォルダ内の全フィードを取得してマージする
     suspend fun fetchMergedFeedContent(folderId: Int): RssFeed {
         return withContext(Dispatchers.IO) {
             val feeds = getFeedsInFolderSync(folderId)
-            
-            // 簡易的に "Folder Feeds" とする。
-            val folderName = "Folder Feeds" 
+            val folder = rssDao.getFolder(folderId)
+            val folderName = folder?.name ?: "Folder Feeds"
 
             if (feeds.isEmpty()) {
                 return@withContext RssFeed("", RssChannel(folderName, "", "No feeds in this folder", emptyList()))
             }
             
-            // 並列で取得
             val deferredResults = feeds.map { feed ->
                 async {
                     try {
@@ -113,8 +157,8 @@ class RssRepository(
             
             val results = deferredResults.awaitAll().filterNotNull()
             
-            // アイテムをマージして日付順（新しい順）にソート
             val allItems = results.flatMap { it.channel.items }
+                .distinctBy { it.link }
                 .sortedByDescending { parsePubDate(it.pubDate) }
                 
             RssFeed(
@@ -136,8 +180,20 @@ class RssRepository(
     }
     
     fun createNotificationChannelsForExistingData(feeds: List<FeedEntity>, folders: List<FolderEntity>) {
-        feeds.forEach { notificationHelper.createChannelForFeed(it) }
-        folders.forEach { notificationHelper.createChannelForFolder(it) }
+        feeds.filter { it.folderId == null }.forEach {
+            try {
+                notificationHelper.createChannelForFeed(it) 
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+        folders.forEach { 
+            try {
+                notificationHelper.createChannelForFolder(it)
+            } catch (e: Exception) {
+                 // Ignore
+            }
+        }
     }
     
     private fun parsePubDate(dateString: String): Long {

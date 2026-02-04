@@ -23,7 +23,7 @@ android {
         create("release") {
             storeFile = file("C:\\Users\\matsu\\Documents\\AndroidProjects\\HyperionRSSReader\\Hyperion_Key") // 君が生成した鍵ストアファイルのパス
             storePassword = System.getenv("KEYSTORE_PASSWORD") // 環境変数から読み込むことを推奨
-            keyAlias = "your_key_alias" // 鍵のエイリアス
+            keyAlias = "hyperion" // 鍵のエイリアス
             keyPassword = System.getenv("KEY_PASSWORD") // 環境変数から読み込むことを推奨
         }
     }

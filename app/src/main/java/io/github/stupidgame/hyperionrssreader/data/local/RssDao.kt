@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -21,11 +22,20 @@ interface RssDao {
     @Query("SELECT * FROM folders")
     suspend fun getAllFoldersSync(): List<FolderEntity>
 
+    @Query("SELECT * FROM folders WHERE id = :folderId")
+    suspend fun getFolder(folderId: Int): FolderEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFeed(feed: FeedEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFolder(folder: FolderEntity): Long
+    
+    @Update
+    suspend fun updateFeed(feed: FeedEntity)
+    
+    @Update
+    suspend fun updateFolder(folder: FolderEntity)
 
     @Delete
     suspend fun deleteFeed(feed: FeedEntity)
