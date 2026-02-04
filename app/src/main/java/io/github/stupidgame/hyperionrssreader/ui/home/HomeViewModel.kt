@@ -195,9 +195,14 @@ class HomeViewModel(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                repository.saveFeed(feed, urlToSave, folderId)
+                val savedFeed = repository.saveFeed(feed, urlToSave, folderId)
                 _foundFeed.value = null 
                 _targetUrl.value = ""
+                
+                // Immediately select the newly added feed
+                _currentSelectedFeed = savedFeed
+                _currentSelectedFolderId = null
+                _currentFeedContent.value = feed
             } catch (e: Exception) {
                 _error.value = "保存に失敗した...: ${e.message}"
             } finally {
