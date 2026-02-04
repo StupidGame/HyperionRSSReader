@@ -54,6 +54,7 @@ class HomeViewModel(
         
     val currentTheme: StateFlow<AppTheme> = settingsRepository.currentTheme
     val currentTimeZoneId: StateFlow<String> = settingsRepository.currentTimeZoneId
+    val updateInterval: StateFlow<Int> = settingsRepository.updateInterval
 
     private val _currentFeedContent = MutableStateFlow<RssFeed?>(null)
     val currentFeedContent: StateFlow<RssFeed?> = _currentFeedContent
@@ -199,10 +200,17 @@ class HomeViewModel(
                 _foundFeed.value = null 
                 _targetUrl.value = ""
                 
-                // Immediately select the newly added feed
-                _currentSelectedFeed = savedFeed
-                _currentSelectedFolderId = null
-                _currentFeedContent.value = feed
+                if (folderId != null) {
+                    _currentSelectedFeed = null
+                    _currentSelectedFolderId = folderId
+                    val content = repository.fetchMergedFeedContent(folderId)
+                    _currentFeedContent.value = content
+                } else {
+                    // Immediately select the newly added feed
+                    _currentSelectedFeed = savedFeed
+                    _currentSelectedFolderId = null
+                    _currentFeedContent.value = feed
+                }
             } catch (e: Exception) {
                 _error.value = "保存に失敗した...: ${e.message}"
             } finally {
@@ -271,6 +279,10 @@ class HomeViewModel(
     
     fun setTimeZone(timeZoneId: String) {
         settingsRepository.setTimeZone(timeZoneId)
+    }
+
+    fun setUpdateInterval(interval: Int) {
+        settingsRepository.setUpdateInterval(interval)
     }
     
     fun openNotificationSettings(feed: FeedEntity) {

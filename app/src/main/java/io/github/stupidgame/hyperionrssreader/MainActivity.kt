@@ -61,7 +61,6 @@ import io.github.stupidgame.hyperionrssreader.ui.theme.HyperionRSSReaderTheme
 import io.github.stupidgame.hyperionrssreader.worker.RssUpdateWorker
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
@@ -95,7 +94,7 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.RequestPermission()
             ) { }
 
-            val updateInterval by settingsRepository.updateInterval.collectAsState()
+            val updateInterval by homeViewModel.updateInterval.collectAsState()
 
             LaunchedEffect(updateInterval) {
                 val workRequest =
@@ -136,7 +135,7 @@ class MainActivity : ComponentActivity() {
             }
 
             HyperionRSSReaderTheme(darkTheme = darkTheme) {
-                HomeScreen(homeViewModel = homeViewModel)
+                HomeScreen(homeViewModel = homeViewModel, updateInterval = updateInterval)
             }
         }
     }
@@ -144,7 +143,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(homeViewModel: HomeViewModel) {
+fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
     val savedFeeds by homeViewModel.savedFeeds.collectAsState()
     val folders by homeViewModel.folders.collectAsState()
     val currentFeedContent by homeViewModel.currentFeedContent.collectAsState()
@@ -156,7 +155,6 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     val error by homeViewModel.error.collectAsState()
     val currentFilter by homeViewModel.currentFilter.collectAsState()
     val currentTimeZoneId by homeViewModel.currentTimeZoneId.collectAsState()
-    val updateInterval by homeViewModel.updateInterval.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
@@ -519,14 +517,14 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             onDismiss = { showSettingsDialog = false },
             currentTimeZoneId = currentTimeZoneId,
             updateInterval = updateInterval,
-            onThemeSelected = { theme ->
-                homeViewModel.setTheme(theme)
+            onThemeSelected = {
+                homeViewModel.setTheme(it)
             },
-            onTimeZoneSelected = { timeZoneId ->
-                homeViewModel.setTimeZone(timeZoneId)
+            onTimeZoneSelected = {
+                homeViewModel.setTimeZone(it)
             },
-            onUpdateIntervalChanged = { interval ->
-                homeViewModel.setUpdateInterval(interval)
+            onUpdateIntervalChanged = {
+                homeViewModel.setUpdateInterval(it)
             },
             onOpenNotificationSettings = {
                 homeViewModel.openAppNotificationSettings()
