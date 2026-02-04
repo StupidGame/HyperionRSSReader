@@ -12,9 +12,10 @@ import io.github.stupidgame.hyperionrssreader.R
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
 import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 
-class NotificationHelper(private val context: Context) {
-
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+class NotificationHelper(context: Context) {
+    
+    private val context: Context = context.applicationContext
+    private val notificationManager = this.context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     fun createChannelForFeed(feed: FeedEntity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -22,6 +22,9 @@ interface RssDao {
     @Query("SELECT * FROM folders")
     suspend fun getAllFoldersSync(): List<FolderEntity>
 
+    @Query("SELECT * FROM folders WHERE id = :folderId")
+    suspend fun getFolder(folderId: Int): FolderEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFeed(feed: FeedEntity): Long
 
