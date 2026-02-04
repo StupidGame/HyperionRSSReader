@@ -54,6 +54,7 @@ class HomeViewModel(
         
     val currentTheme: StateFlow<AppTheme> = settingsRepository.currentTheme
     val currentTimeZoneId: StateFlow<String> = settingsRepository.currentTimeZoneId
+    val updateInterval: StateFlow<Int> = settingsRepository.updateInterval
 
     private val _currentFeedContent = MutableStateFlow<RssFeed?>(null)
     val currentFeedContent: StateFlow<RssFeed?> = _currentFeedContent
@@ -271,6 +272,10 @@ class HomeViewModel(
     
     fun setTimeZone(timeZoneId: String) {
         settingsRepository.setTimeZone(timeZoneId)
+    }
+
+    fun setUpdateInterval(interval: Int) {
+        settingsRepository.setUpdateInterval(interval)
     }
     
     fun openNotificationSettings(feed: FeedEntity) {
