@@ -42,7 +42,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.OneTimeWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
@@ -69,18 +68,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
-        val workRequest = PeriodicWorkRequestBuilder<RssUpdateWorker>(15, TimeUnit.MINUTES)
-            .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "rss_update_work",
-            ExistingPeriodicWorkPolicy.KEEP,
-            workRequest
-        )
 
-        val oneTimeRequest = OneTimeWorkRequest.Builder(RssUpdateWorker::class.java).build()
-        WorkManager.getInstance(this).enqueue(oneTimeRequest)
-        
         setContent {
             val context = LocalContext.current
             val database = RssDatabase.getDatabase(context)
@@ -89,8 +77,8 @@ class MainActivity : ComponentActivity() {
             val rssFeedService = RssFeedService(okHttpClient, rssFeedParser)
             val notificationHelper = remember { NotificationHelper(context) }
             val repository = RssRepository(database.rssDao(), rssFeedService, notificationHelper)
-            val settingsRepository = SettingsRepository(context)
-            
+            val settingsRepository = remember { SettingsRepository(context) }
+
             val homeViewModel: HomeViewModel = viewModel(
                 factory = object : ViewModelProvider.Factory {
                     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -106,6 +94,21 @@ class MainActivity : ComponentActivity() {
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) { }
+
+            val updateInterval by settingsRepository.updateInterval.collectAsState()
+
+            LaunchedEffect(updateInterval) {
+                val workRequest =
+                    PeriodicWorkRequestBuilder<RssUpdateWorker>(
+                        updateInterval.toLong(),
+                        TimeUnit.MINUTES
+                    ).build()
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    "rss_update_work",
+                    ExistingPeriodicWorkPolicy.REPLACE,
+                    workRequest
+                )
+            }
 
             LaunchedEffect(Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -153,6 +156,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     val error by homeViewModel.error.collectAsState()
     val currentFilter by homeViewModel.currentFilter.collectAsState()
     val currentTimeZoneId by homeViewModel.currentTimeZoneId.collectAsState()
+    val updateInterval by homeViewModel.updateInterval.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
@@ -161,7 +165,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
     var folderToEdit by remember { mutableStateOf<FolderEntity?>(null) }
-    
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
@@ -179,12 +183,12 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         Text("Folders", style = MaterialTheme.typography.titleMedium)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     }
-                    
+
                     item {
                         NavigationDrawerItem(
                             label = { Text("All Feeds") },
                             selected = currentFilter is FeedFilter.All,
-                            onClick = { 
+                            onClick = {
                                 homeViewModel.setFilter(FeedFilter.All)
                                 scope.launch { drawerState.close() }
                             },
@@ -192,13 +196,13 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         NavigationDrawerItem(
                             label = { Text("Uncategorized") },
                             selected = currentFilter is FeedFilter.Uncategorized,
-                            onClick = { 
-                                homeViewModel.setFilter(FeedFilter.Uncategorized) 
+                            onClick = {
+                                homeViewModel.setFilter(FeedFilter.Uncategorized)
                                 scope.launch { drawerState.close() }
                             },
                             icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
@@ -220,7 +224,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                                 }
                             },
                             selected = currentFilter is FeedFilter.Folder && (currentFilter as FeedFilter.Folder).id == folder.id,
-                            onClick = { 
+                            onClick = {
                                 homeViewModel.setFilter(FeedFilter.Folder(folder.id))
                                 scope.launch { drawerState.close() }
                             },
@@ -228,12 +232,12 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         Text("Feeds", style = MaterialTheme.typography.titleMedium)
                     }
-                    
+
                     items(savedFeeds, key = { "feed_${it.id}" }) { feed ->
                         NavigationDrawerItem(
                             label = {
@@ -251,26 +255,26 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                                 }
                             },
                             selected = false,
-                            onClick = { 
-                                homeViewModel.selectFeed(feed) 
+                            onClick = {
+                                homeViewModel.selectFeed(feed)
                                 scope.launch { drawerState.close() }
                             },
                             icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         NavigationDrawerItem(
-                            label = { Text("Settings") }, 
+                            label = { Text("Settings") },
                             selected = false,
                             onClick = { showSettingsDialog = true },
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
                         TextButton(
@@ -287,7 +291,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { 
+                    title = {
                         Text(when(currentFilter) {
                             FeedFilter.All -> "Hyperion RSS (All)"
                             FeedFilter.Uncategorized -> "Hyperion RSS (Uncategorized)"
@@ -296,7 +300,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                                 val folderName = folders.find { it.id == folderId }?.name ?: "Folder"
                                 "Hyperion RSS ($folderName)"
                             }
-                        }) 
+                        })
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -323,7 +327,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
-                                .pointerInput(feed.id) { 
+                                .pointerInput(feed.id) {
                                     detectTapGestures(
                                         onLongPress = { feedToDelete = feed },
                                         onTap = { homeViewModel.selectFeed(feed) }
@@ -349,7 +353,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         }
                     }
                 }
-                
+
                 HorizontalDivider()
 
                 Box(modifier = Modifier.fillMaxSize().weight(1f)) {
@@ -397,7 +401,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (feedToEdit != null) {
         EditTitleDialog(
             title = "Edit Feed Title",
@@ -409,7 +413,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (folderToEdit != null) {
         EditTitleDialog(
             title = "Edit Folder Name",
@@ -421,7 +425,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (feedToDelete != null) {
         AlertDialog(
             onDismissRequest = { feedToDelete = null },
@@ -442,7 +446,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (folderToDelete != null) {
         AlertDialog(
             onDismissRequest = { folderToDelete = null },
@@ -473,7 +477,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (rssCandidates.isNotEmpty()) {
         SelectCandidateDialog(
             candidates = rssCandidates,
@@ -485,7 +489,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (foundFeed != null) {
         ConfirmFeedDialog(
             feed = foundFeed!!,
@@ -499,7 +503,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (showAddFolderDialog) {
         AddFolderDialog(
             onDismiss = { showAddFolderDialog = false },
@@ -509,16 +513,20 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (showSettingsDialog) {
         SettingsDialog(
             onDismiss = { showSettingsDialog = false },
             currentTimeZoneId = currentTimeZoneId,
+            updateInterval = updateInterval,
             onThemeSelected = { theme ->
                 homeViewModel.setTheme(theme)
             },
             onTimeZoneSelected = { timeZoneId ->
                 homeViewModel.setTimeZone(timeZoneId)
+            },
+            onUpdateIntervalChanged = { interval ->
+                homeViewModel.setUpdateInterval(interval)
             },
             onOpenNotificationSettings = {
                 homeViewModel.openAppNotificationSettings()
@@ -598,8 +606,10 @@ fun SelectCandidateDialog(
 fun SettingsDialog(
     onDismiss: () -> Unit,
     currentTimeZoneId: String,
+    updateInterval: Int,
     onThemeSelected: (AppTheme) -> Unit,
     onTimeZoneSelected: (String) -> Unit,
+    onUpdateIntervalChanged: (Int) -> Unit,
     onOpenNotificationSettings: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -621,11 +631,11 @@ fun SettingsDialog(
                     TextButton(onClick = { onThemeSelected(AppTheme.DARK) }) { Text("Dark") }
                     TextButton(onClick = { onThemeSelected(AppTheme.SYSTEM) }) { Text("System") }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Text("Time Zone", style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(8.dp))
                 Box {
@@ -651,12 +661,21 @@ fun SettingsDialog(
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Text("Notifications", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Update Interval: $updateInterval minutes")
+                Slider(
+                    value = updateInterval.toFloat(),
+                    onValueChange = { onUpdateIntervalChanged(it.toInt()) },
+                    valueRange = 5f..60f,
+                    steps = 10
+                )
+
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
                     onClick = { onOpenNotificationSettings() },
@@ -709,13 +728,13 @@ fun AddFeedDialog(onDismiss: () -> Unit, onVerify: (String) -> Unit) {
 @Composable
 fun ConfirmFeedDialog(
     feed: RssFeed,
-    targetUrl: String, 
+    targetUrl: String,
     folders: List<FolderEntity>,
     onConfirm: (Int?) -> Unit,
     onCancel: () -> Unit
 ) {
     var selectedFolderId by remember { mutableStateOf<Int?>(null) }
-    
+
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Subscribe to Feed?") },
@@ -727,7 +746,7 @@ fun ConfirmFeedDialog(
                 Text("Register as: $targetUrl", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(decodeHtml(feed.channel.description), maxLines = 3, style = MaterialTheme.typography.bodyMedium)
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Select Folder (Optional):")
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -790,15 +809,15 @@ fun AddFolderDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 
 @Composable
 fun FeedContent(
-    rssFeed: RssFeed, 
+    rssFeed: RssFeed,
     timeZoneId: String,
     formatDate: (String, String) -> String,
-    onItemClick: (String) -> Unit, 
+    onItemClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(16.dp)) {
         Text(text = decodeHtml(rssFeed.channel.title), style = MaterialTheme.typography.headlineMedium)
-        
+
         LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
             items(rssFeed.channel.items, key = { it.link }) { item ->
                 val formattedDate = formatDate(item.pubDate, timeZoneId)
