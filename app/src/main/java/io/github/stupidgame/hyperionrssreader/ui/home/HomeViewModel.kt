@@ -113,6 +113,16 @@ class HomeViewModel(
         }
     }
     
+    fun deleteFolder(folder: FolderEntity) {
+        viewModelScope.launch {
+            try {
+                repository.deleteFolder(folder)
+            } catch (e: Exception) {
+                _error.value = "削除に失敗しました: ${e.message}"
+            }
+        }
+    }
+    
     fun updateFeedTitle(feed: FeedEntity, newTitle: String) {
         viewModelScope.launch {
             try {
