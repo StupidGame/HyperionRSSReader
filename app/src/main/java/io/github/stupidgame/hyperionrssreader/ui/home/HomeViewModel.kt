@@ -200,10 +200,17 @@ class HomeViewModel(
                 _foundFeed.value = null 
                 _targetUrl.value = ""
                 
-                // Immediately select the newly added feed
-                _currentSelectedFeed = savedFeed
-                _currentSelectedFolderId = null
-                _currentFeedContent.value = feed
+                if (folderId != null) {
+                    _currentSelectedFeed = null
+                    _currentSelectedFolderId = folderId
+                    val content = repository.fetchMergedFeedContent(folderId)
+                    _currentFeedContent.value = content
+                } else {
+                    // Immediately select the newly added feed
+                    _currentSelectedFeed = savedFeed
+                    _currentSelectedFolderId = null
+                    _currentFeedContent.value = feed
+                }
             } catch (e: Exception) {
                 _error.value = "保存に失敗した...: ${e.message}"
             } finally {
