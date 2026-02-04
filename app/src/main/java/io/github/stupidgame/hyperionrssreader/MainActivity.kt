@@ -158,6 +158,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var feedToDelete by remember { mutableStateOf<FeedEntity?>(null) }
+    var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
     var folderToEdit by remember { mutableStateOf<FolderEntity?>(null) }
     
@@ -205,13 +206,16 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         )
                     }
 
-                    items(folders, key = { it.id }) { folder ->
+                    items(folders, key = { "folder_${it.id}" }) { folder ->
                         NavigationDrawerItem(
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(folder.name, modifier = Modifier.weight(1f))
                                     IconButton(onClick = { folderToEdit = folder }) {
                                         Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
+                                    IconButton(onClick = { folderToDelete = folder }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                                     }
                                 }
                             },
@@ -230,7 +234,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         Text("Feeds", style = MaterialTheme.typography.titleMedium)
                     }
                     
-                    items(savedFeeds, key = { it.id }) { feed ->
+                    items(savedFeeds, key = { "feed_${it.id}" }) { feed ->
                         NavigationDrawerItem(
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -438,6 +442,27 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
+    
+    if (folderToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { folderToDelete = null },
+            title = { Text("Delete Folder?") },
+            text = { Text("Are you sure you want to delete '${folderToDelete?.name ?: ""}'? Feeds inside will become uncategorized.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    folderToDelete?.let { homeViewModel.deleteFolder(it) }
+                    folderToDelete = null
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     if (showAddDialog) {
         AddFeedDialog(
@@ -547,7 +572,7 @@ fun SelectCandidateDialog(
                 Text("Multiple feeds found. Please select one:")
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    items(candidates) { candidate ->
+                    items(candidates, key = { it.url }) { candidate ->
                         ListItem(
                             headlineContent = { Text(decodeHtml(candidate.title)) },
                             supportingContent = { Text(candidate.url, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -775,7 +800,7 @@ fun FeedContent(
         Text(text = decodeHtml(rssFeed.channel.title), style = MaterialTheme.typography.headlineMedium)
         
         LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
-            items(rssFeed.channel.items) { item ->
+            items(rssFeed.channel.items, key = { it.link }) { item ->
                 val formattedDate = formatDate(item.pubDate, timeZoneId)
                 ListItem(
                     headlineContent = { Text(decodeHtml(item.title)) },
