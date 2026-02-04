@@ -42,8 +42,8 @@ class RssRepository(
         }
     }
     
-    suspend fun saveFeed(feed: RssFeed, originalUrl: String, folderId: Int? = null) {
-        withContext(Dispatchers.IO) {
+    suspend fun saveFeed(feed: RssFeed, originalUrl: String, folderId: Int? = null): FeedEntity {
+        return withContext(Dispatchers.IO) {
             val entity = FeedEntity(
                 url = originalUrl, 
                 rssUrl = feed.url, 
@@ -62,6 +62,7 @@ class RssRepository(
                     // Ignore notification channel creation errors
                 }
             }
+            savedEntity
         }
     }
     
