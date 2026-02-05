@@ -22,10 +22,13 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,14 +37,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.OneTimeWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.MobileAds
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
 import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 import io.github.stupidgame.hyperionrssreader.data.local.RssDatabase
@@ -59,25 +66,14 @@ import io.github.stupidgame.hyperionrssreader.ui.theme.HyperionRSSReaderTheme
 import io.github.stupidgame.hyperionrssreader.worker.RssUpdateWorker
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
-        val workRequest = PeriodicWorkRequestBuilder<RssUpdateWorker>(15, TimeUnit.MINUTES)
-            .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "rss_update_work",
-            ExistingPeriodicWorkPolicy.KEEP,
-            workRequest
-        )
+        MobileAds.initialize(this) {}
 
-        val oneTimeRequest = OneTimeWorkRequest.Builder(RssUpdateWorker::class.java).build()
-        WorkManager.getInstance(this).enqueue(oneTimeRequest)
-        
         setContent {
             val context = LocalContext.current
             val database = RssDatabase.getDatabase(context)
@@ -86,8 +82,8 @@ class MainActivity : ComponentActivity() {
             val rssFeedService = RssFeedService(okHttpClient, rssFeedParser)
             val notificationHelper = remember { NotificationHelper(context) }
             val repository = RssRepository(database.rssDao(), rssFeedService, notificationHelper)
-            val settingsRepository = SettingsRepository(context)
-            
+            val settingsRepository = remember { SettingsRepository(context) }
+
             val homeViewModel: HomeViewModel = viewModel(
                 factory = object : ViewModelProvider.Factory {
                     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -102,7 +98,22 @@ class MainActivity : ComponentActivity() {
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
-            ) { isGranted -> }
+            ) { }
+
+            val updateInterval by homeViewModel.updateInterval.collectAsState()
+
+            LaunchedEffect(updateInterval) {
+                val workRequest =
+                    PeriodicWorkRequestBuilder<RssUpdateWorker>(
+                        updateInterval.toLong(),
+                        TimeUnit.MINUTES
+                    ).build()
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    "rss_update_work",
+                    ExistingPeriodicWorkPolicy.REPLACE,
+                    workRequest
+                )
+            }
 
             LaunchedEffect(Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -130,7 +141,7 @@ class MainActivity : ComponentActivity() {
             }
 
             HyperionRSSReaderTheme(darkTheme = darkTheme) {
-                HomeScreen(homeViewModel = homeViewModel)
+                HomeScreen(homeViewModel = homeViewModel, updateInterval = updateInterval)
             }
         }
     }
@@ -138,7 +149,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(homeViewModel: HomeViewModel) {
+fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
     val savedFeeds by homeViewModel.savedFeeds.collectAsState()
     val folders by homeViewModel.folders.collectAsState()
     val currentFeedContent by homeViewModel.currentFeedContent.collectAsState()
@@ -146,6 +157,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     val targetUrl by homeViewModel.targetUrl.collectAsState()
     val rssCandidates by homeViewModel.rssCandidates.collectAsState()
     val isLoading by homeViewModel.isLoading.collectAsState()
+    val isRefreshing by homeViewModel.isRefreshing.collectAsState()
     val error by homeViewModel.error.collectAsState()
     val currentFilter by homeViewModel.currentFilter.collectAsState()
     val currentTimeZoneId by homeViewModel.currentTimeZoneId.collectAsState()
@@ -154,10 +166,14 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var feedToDelete by remember { mutableStateOf<FeedEntity?>(null) }
-    
+    var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
+    var feedToEdit by remember { mutableStateOf<FeedEntity?>(null) }
+    var folderToEdit by remember { mutableStateOf<FolderEntity?>(null) }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    val pullRefreshState = rememberPullToRefreshState()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -171,12 +187,12 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         Text("Folders", style = MaterialTheme.typography.titleMedium)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     }
-                    
+
                     item {
                         NavigationDrawerItem(
                             label = { Text("All Feeds") },
                             selected = currentFilter is FeedFilter.All,
-                            onClick = { 
+                            onClick = {
                                 homeViewModel.setFilter(FeedFilter.All)
                                 scope.launch { drawerState.close() }
                             },
@@ -184,13 +200,13 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         NavigationDrawerItem(
                             label = { Text("Uncategorized") },
                             selected = currentFilter is FeedFilter.Uncategorized,
-                            onClick = { 
-                                homeViewModel.setFilter(FeedFilter.Uncategorized) 
+                            onClick = {
+                                homeViewModel.setFilter(FeedFilter.Uncategorized)
                                 scope.launch { drawerState.close() }
                             },
                             icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
@@ -198,11 +214,21 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         )
                     }
 
-                    items(folders) { folder ->
+                    items(folders, key = { "folder_${it.id}" }) { folder ->
                         NavigationDrawerItem(
-                            label = { Text(folder.name) },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(folder.name, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { folderToEdit = folder }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
+                                    IconButton(onClick = { folderToDelete = folder }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            },
                             selected = currentFilter is FeedFilter.Folder && (currentFilter as FeedFilter.Folder).id == folder.id,
-                            onClick = { 
+                            onClick = {
                                 homeViewModel.setFilter(FeedFilter.Folder(folder.id))
                                 scope.launch { drawerState.close() }
                             },
@@ -210,13 +236,13 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         Text("Feeds", style = MaterialTheme.typography.titleMedium)
                     }
-                    
-                    items(savedFeeds) { feed ->
+
+                    items(savedFeeds, key = { "feed_${it.id}" }) { feed ->
                         NavigationDrawerItem(
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -224,32 +250,35 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                                         Text(decodeHtml(feed.title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(feed.url, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
+                                    IconButton(onClick = { feedToEdit = feed }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                    }
                                     IconButton(onClick = { feedToDelete = feed }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                                     }
                                 }
                             },
                             selected = false,
-                            onClick = { 
-                                homeViewModel.selectFeed(feed) 
+                            onClick = {
+                                homeViewModel.selectFeed(feed)
                                 scope.launch { drawerState.close() }
                             },
                             icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         NavigationDrawerItem(
-                            label = { Text("Settings") }, 
+                            label = { Text("Settings") },
                             selected = false,
                             onClick = { showSettingsDialog = true },
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
                     }
-                    
+
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
                         TextButton(
@@ -266,7 +295,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { 
+                    title = {
                         Text(when(currentFilter) {
                             FeedFilter.All -> "Hyperion RSS (All)"
                             FeedFilter.Uncategorized -> "Hyperion RSS (Uncategorized)"
@@ -275,7 +304,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                                 val folderName = folders.find { it.id == folderId }?.name ?: "Folder"
                                 "Hyperion RSS ($folderName)"
                             }
-                        }) 
+                        })
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -297,12 +326,12 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         .fillMaxWidth()
                         .height(140.dp)
                 ) {
-                    items(savedFeeds) { feed ->
+                    items(savedFeeds, key = { it.id }) { feed ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
-                                .pointerInput(Unit) {
+                                .pointerInput(feed.id) {
                                     detectTapGestures(
                                         onLongPress = { feedToDelete = feed },
                                         onTap = { homeViewModel.selectFeed(feed) }
@@ -328,24 +357,31 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         }
                     }
                 }
-                
+
                 HorizontalDivider()
 
                 Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                    } else if (currentFeedContent != null) {
-                        FeedContent(
-                            rssFeed = currentFeedContent!!,
-                            timeZoneId = currentTimeZoneId,
-                            formatDate = { date, tz -> homeViewModel.formatDate(date, tz) },
-                            onItemClick = { url ->
-                                try {
-                                    uriHandler.openUri(url)
-                                } catch (e: Exception) {
+                    if (currentFeedContent != null) {
+                        PullToRefreshBox(
+                            isRefreshing = isRefreshing,
+                            onRefresh = { homeViewModel.refreshCurrentFeed() },
+                            state = pullRefreshState,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            FeedContent(
+                                rssFeed = currentFeedContent!!,
+                                timeZoneId = currentTimeZoneId,
+                                formatDate = { date, tz -> homeViewModel.formatDate(date, tz) },
+                                onItemClick = { url ->
+                                    try {
+                                        uriHandler.openUri(url)
+                                    } catch (e: Exception) {
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
+                    } else if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     } else {
                         Text(
                             text = "Select a feed to view",
@@ -353,6 +389,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
                         )
                     }
                 }
+                AdBanner()
             }
         }
     }
@@ -369,12 +406,36 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
+    if (feedToEdit != null) {
+        EditTitleDialog(
+            title = "Edit Feed Title",
+            initialValue = decodeHtml(feedToEdit!!.title),
+            onDismiss = { feedToEdit = null },
+            onConfirm = { newTitle ->
+                homeViewModel.updateFeedTitle(feedToEdit!!, newTitle)
+                feedToEdit = null
+            }
+        )
+    }
+
+    if (folderToEdit != null) {
+        EditTitleDialog(
+            title = "Edit Folder Name",
+            initialValue = folderToEdit!!.name,
+            onDismiss = { folderToEdit = null },
+            onConfirm = { newName ->
+                homeViewModel.updateFolderName(folderToEdit!!, newName)
+                folderToEdit = null
+            }
+        )
+    }
+
     if (feedToDelete != null) {
         AlertDialog(
             onDismissRequest = { feedToDelete = null },
             title = { Text("Delete Feed?") },
-            text = { Text("Are you sure you want to delete '${feedToDelete?.title}'?") },
+            text = { Text("Are you sure you want to delete '${decodeHtml(feedToDelete?.title ?: "")}'?") },
             confirmButton = {
                 TextButton(onClick = {
                     feedToDelete?.let { homeViewModel.deleteFeed(it) }
@@ -391,6 +452,27 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
         )
     }
 
+    if (folderToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { folderToDelete = null },
+            title = { Text("Delete Folder?") },
+            text = { Text("Are you sure you want to delete '${folderToDelete?.name ?: ""}'? Feeds inside will become uncategorized.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    folderToDelete?.let { homeViewModel.deleteFolder(it) }
+                    folderToDelete = null
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showAddDialog) {
         AddFeedDialog(
             onDismiss = { showAddDialog = false },
@@ -400,7 +482,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (rssCandidates.isNotEmpty()) {
         SelectCandidateDialog(
             candidates = rssCandidates,
@@ -412,7 +494,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (foundFeed != null) {
         ConfirmFeedDialog(
             feed = foundFeed!!,
@@ -426,7 +508,7 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (showAddFolderDialog) {
         AddFolderDialog(
             onDismiss = { showAddFolderDialog = false },
@@ -436,22 +518,71 @@ fun HomeScreen(homeViewModel: HomeViewModel) {
             }
         )
     }
-    
+
     if (showSettingsDialog) {
         SettingsDialog(
             onDismiss = { showSettingsDialog = false },
             currentTimeZoneId = currentTimeZoneId,
-            onThemeSelected = { theme ->
-                homeViewModel.setTheme(theme)
+            updateInterval = updateInterval,
+            onThemeSelected = {
+                homeViewModel.setTheme(it)
             },
-            onTimeZoneSelected = { timeZoneId ->
-                homeViewModel.setTimeZone(timeZoneId)
+            onTimeZoneSelected = {
+                homeViewModel.setTimeZone(it)
+            },
+            onUpdateIntervalChanged = {
+                homeViewModel.setUpdateInterval(it)
             },
             onOpenNotificationSettings = {
                 homeViewModel.openAppNotificationSettings()
             }
         )
     }
+}
+
+@Composable
+fun AdBanner() {
+    AndroidView(
+        modifier = Modifier.fillMaxWidth(),
+        factory = { context ->
+            AdView(context).apply {
+                setAdSize(AdSize.BANNER)
+                adUnitId = "ca-app-pub-3940256098942544/6300978111" // Test ID
+                loadAd(AdRequest.Builder().build())
+            }
+        }
+    )
+}
+
+@Composable
+fun EditTitleDialog(
+    title: String,
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initialValue) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -468,7 +599,7 @@ fun SelectCandidateDialog(
                 Text("Multiple feeds found. Please select one:")
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    items(candidates) { candidate ->
+                    items(candidates, key = { it.url }) { candidate ->
                         ListItem(
                             headlineContent = { Text(decodeHtml(candidate.title)) },
                             supportingContent = { Text(candidate.url, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -485,6 +616,97 @@ fun SelectCandidateDialog(
         dismissButton = {
             TextButton(onClick = onCancel) {
                 Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SettingsDialog(
+    onDismiss: () -> Unit,
+    currentTimeZoneId: String,
+    updateInterval: Int,
+    onThemeSelected: (AppTheme) -> Unit,
+    onTimeZoneSelected: (String) -> Unit,
+    onUpdateIntervalChanged: (Int) -> Unit,
+    onOpenNotificationSettings: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // Remove unused variable 'availableTimeZones' if it's not being used yet
+    // But since it's just 'val', it doesn't hurt much, but let's clean it if requested.
+    // However, I'll keep commonTimeZones.
+    val commonTimeZones = listOf("UTC", "Asia/Tokyo", "America/New_York", "Europe/London", "Asia/Shanghai")
+    val displayTimeZones = (commonTimeZones + currentTimeZoneId).distinct().sorted()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Appearance", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { onThemeSelected(AppTheme.LIGHT) }) { Text("Light") }
+                    TextButton(onClick = { onThemeSelected(AppTheme.DARK) }) { Text("Dark") }
+                    TextButton(onClick = { onThemeSelected(AppTheme.SYSTEM) }) { Text("System") }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Time Zone", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Box {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(currentTimeZoneId)
+                        Icon(Icons.Filled.ArrowDropDown, "Select Time Zone")
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        displayTimeZones.forEach { id ->
+                            DropdownMenuItem(
+                                text = { Text(id) },
+                                onClick = {
+                                    onTimeZoneSelected(id)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Notifications", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Update Interval: $updateInterval minutes")
+                Slider(
+                    value = updateInterval.toFloat(),
+                    onValueChange = { onUpdateIntervalChanged(it.toInt()) },
+                    valueRange = 5f..60f,
+                    steps = 10
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { onOpenNotificationSettings() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Manage Notifications")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
             }
         }
     )
@@ -525,13 +747,13 @@ fun AddFeedDialog(onDismiss: () -> Unit, onVerify: (String) -> Unit) {
 @Composable
 fun ConfirmFeedDialog(
     feed: RssFeed,
-    targetUrl: String, 
+    targetUrl: String,
     folders: List<FolderEntity>,
     onConfirm: (Int?) -> Unit,
     onCancel: () -> Unit
 ) {
     var selectedFolderId by remember { mutableStateOf<Int?>(null) }
-    
+
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Subscribe to Feed?") },
@@ -543,7 +765,7 @@ fun ConfirmFeedDialog(
                 Text("Register as: $targetUrl", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(decodeHtml(feed.channel.description), maxLines = 3, style = MaterialTheme.typography.bodyMedium)
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Select Folder (Optional):")
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -605,97 +827,18 @@ fun AddFolderDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 }
 
 @Composable
-fun SettingsDialog(
-    onDismiss: () -> Unit,
-    currentTimeZoneId: String,
-    onThemeSelected: (AppTheme) -> Unit,
-    onTimeZoneSelected: (String) -> Unit,
-    onOpenNotificationSettings: () -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val availableTimeZones = remember { TimeZone.getAvailableIDs().toList().sorted() }
-    
-    val commonTimeZones = listOf("UTC", "Asia/Tokyo", "America/New_York", "Europe/London", "Asia/Shanghai")
-    val displayTimeZones = (commonTimeZones + currentTimeZoneId).distinct().sorted()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Settings") },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("Appearance", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    TextButton(onClick = { onThemeSelected(AppTheme.LIGHT) }) { Text("Light") }
-                    TextButton(onClick = { onThemeSelected(AppTheme.DARK) }) { Text("Dark") }
-                    TextButton(onClick = { onThemeSelected(AppTheme.SYSTEM) }) { Text("System") }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text("Time Zone", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                Box {
-                    OutlinedButton(
-                        onClick = { expanded = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(currentTimeZoneId)
-                        Icon(Icons.Filled.ArrowDropDown, "Select Time Zone")
-                    }
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        displayTimeZones.forEach { id ->
-                            DropdownMenuItem(
-                                text = { Text(id) },
-                                onClick = {
-                                    onTimeZoneSelected(id)
-                                    expanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text("Notifications", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = { onOpenNotificationSettings() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Manage Notifications")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
-            }
-        }
-    )
-}
-
-@Composable
 fun FeedContent(
-    rssFeed: RssFeed, 
+    rssFeed: RssFeed,
     timeZoneId: String,
     formatDate: (String, String) -> String,
-    onItemClick: (String) -> Unit, 
+    onItemClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(16.dp)) {
         Text(text = decodeHtml(rssFeed.channel.title), style = MaterialTheme.typography.headlineMedium)
-        
+
         LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
-            items(rssFeed.channel.items) { item ->
+            items(rssFeed.channel.items, key = { it.link }) { item ->
                 val formattedDate = formatDate(item.pubDate, timeZoneId)
                 ListItem(
                     headlineContent = { Text(decodeHtml(item.title)) },

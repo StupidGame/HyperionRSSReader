@@ -12,9 +12,10 @@ import io.github.stupidgame.hyperionrssreader.R
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
 import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 
-class NotificationHelper(private val context: Context) {
-
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+class NotificationHelper(context: Context) {
+    
+    private val context: Context = context.applicationContext
+    private val notificationManager = this.context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     fun createChannelForFeed(feed: FeedEntity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -37,6 +38,34 @@ class NotificationHelper(private val context: Context) {
                 description = "Notifications for feeds in ${folder.name}"
             }
             notificationManager.createNotificationChannel(channel)
+        }
+    }
+    
+    fun deleteChannelForFeed(feedId: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = getFeedChannelId(feedId)
+            notificationManager.deleteNotificationChannel(channelId)
+        }
+    }
+    
+    fun deleteChannelForFolder(folderId: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = getFolderChannelId(folderId)
+            notificationManager.deleteNotificationChannel(channelId)
+        }
+    }
+    
+    fun updateChannelForFeed(feed: FeedEntity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Channel name update requires recreation with same ID but different name (actually just updates name)
+            // Or just create again.
+            createChannelForFeed(feed)
+        }
+    }
+    
+    fun updateChannelForFolder(folder: FolderEntity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            createChannelForFolder(folder)
         }
     }
 
