@@ -13,15 +13,15 @@ android {
         applicationId = "io.github.stupidgame.hyperionrssreader"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
         create("release") {
-            storeFile = File(System.getenv("HYPERION_KEY_PATH")) // 君が生成した鍵ストアファイルのパス
+            storeFile = file(System.getenv("HYPERION_KEY_PATH")) // 君が生成した鍵ストアファイルのパス
             storePassword = System.getenv("KEYSTORE_PASSWORD") // 環境変数から読み込むことを推奨
             keyAlias = "hyperion" // 鍵のエイリアス
             keyPassword = System.getenv("KEY_PASSWORD") // 環境変数から読み込むことを推奨
@@ -66,7 +66,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.android.gms:play-services-ads:23.0.0")
+    implementation("com.google.android.gms:play-services-ads:24.9.0")
+    implementation("org.jsoup:jsoup:1.22.1")
+    implementation("com.prof18.rssparser:rssparser:6.1.3")
     
     val room_version = "2.8.4"
     implementation("androidx.room:room-runtime:$room_version")
