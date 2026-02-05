@@ -1,101 +1,56 @@
 package io.github.stupidgame.hyperionrssreader.data.remote
 
-import android.text.Html
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
-import java.io.InputStream
+import com.prof18.rssparser.RssParserBuilder
+import com.prof18.rssparser.model.RssChannel as LibRssChannel
+import com.prof18.rssparser.model.RssItem as LibRssItem
 
+// Keep existing data classes
 data class RssFeed(
     val url: String,
-    val channel: RssChannel
+    val channel: RssChannel,
 )
 
 data class RssChannel(
     val title: String,
     val link: String,
     val description: String,
-    val items: List<RssItem>
+    val items: List<RssItem>,
 )
 
 data class RssItem(
     val title: String,
     val link: String,
     val pubDate: String,
-    val description: String
+    val description: String,
 )
 
 class RssFeedParser {
 
-    fun parse(inputStream: InputStream, feedUrl: String): RssFeed {
-        val parserFactory = XmlPullParserFactory.newInstance()
-        parserFactory.isNamespaceAware = false
-        val parser = parserFactory.newPullParser()
-        parser.setInput(inputStream, null)
+    private val parser = RssParserBuilder().build()
 
-        var eventType = parser.eventType
-        var channel: RssChannel? = null
-        val items = mutableListOf<RssItem>()
-
-        var title: String? = null
-        var link: String? = null
-        var description: String? = null
-        var pubDate: String? = null
-
-        var inItem = false
-
-        while (eventType != XmlPullParser.END_DOCUMENT) {
-            val tagName = parser.name
-
-            when (eventType) {
-                XmlPullParser.START_TAG -> {
-                    when (tagName) {
-                        "channel" -> {
-                            channel = RssChannel("", "", "", emptyList())
-                        }
-                        "item" -> {
-                            inItem = true
-                        }
-                        "title" -> {
-                            val text = decode(parser.nextText())
-                            if (inItem) title = text else if (channel != null) channel = channel.copy(title = text)
-                        }
-                        "link" -> {
-                            if (inItem) link = parser.nextText() else if (channel != null) channel = channel.copy(link = parser.nextText())
-                        }
-                        "description" -> {
-                            val text = decode(parser.nextText())
-                            if (inItem) description = text else if (channel != null) channel = channel.copy(description = text)
-                        }
-                        "pubDate" -> {
-                            if (inItem) pubDate = parser.nextText()
-                        }
-                    }
-                }
-                XmlPullParser.END_TAG -> {
-                    when (tagName) {
-                        "item" -> {
-                            if (title != null && link != null && pubDate != null && description != null) {
-                                items.add(RssItem(title, link, pubDate, description))
-                            }
-                            title = null
-                            link = null
-                            pubDate = null
-                            description = null
-                            inItem = false
-                        }
-                        "channel" -> {
-                            channel = channel?.copy(items = items.toList())
-                        }
-                    }
-                }
-            }
-            eventType = parser.next()
-        }
-
-        return RssFeed(feedUrl, channel ?: throw IllegalStateException("RSS Channel not found"))
+    suspend fun parse(feedUrl: String): RssFeed {
+        val libChannel = parser.getRssChannel(feedUrl)
+        return RssFeed(
+            url = feedUrl,
+            channel = mapChannel(libChannel)
+        )
     }
-    
-    private fun decode(text: String): String {
-        return Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY).toString()
+
+    private fun mapChannel(libChannel: LibRssChannel): RssChannel {
+        return RssChannel(
+            title = libChannel.title ?: "",
+            link = libChannel.link ?: "",
+            description = libChannel.description ?: "",
+            items = libChannel.items.map { mapItem(it) }
+        )
+    }
+
+    private fun mapItem(libItem: LibRssItem): RssItem {
+        return RssItem(
+            title = libItem.title ?: "",
+            link = libItem.link ?: "",
+            pubDate = libItem.pubDate ?: "",
+            description = libItem.content ?: libItem.description ?: ""
+        )
     }
 }
