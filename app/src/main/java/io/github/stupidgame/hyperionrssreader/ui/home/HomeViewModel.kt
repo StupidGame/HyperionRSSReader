@@ -19,9 +19,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.Date
 
 sealed class FeedFilter {
     object All : FeedFilter()
@@ -54,6 +54,7 @@ class HomeViewModel(
         
     val currentTheme: StateFlow<AppTheme> = settingsRepository.currentTheme
     val currentTimeZoneId: StateFlow<String> = settingsRepository.currentTimeZoneId
+    val updateInterval: StateFlow<Int> = settingsRepository.updateInterval
 
     private val _currentFeedContent = MutableStateFlow<RssFeed?>(null)
     val currentFeedContent: StateFlow<RssFeed?> = _currentFeedContent
@@ -63,6 +64,9 @@ class HomeViewModel(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+    
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
@@ -78,8 +82,31 @@ class HomeViewModel(
 
     fun setFilter(filter: FeedFilter) {
         _currentFilter.value = filter
-        if (filter is FeedFilter.Folder) {
-            loadFolderContent(filter.id)
+        when (filter) {
+            is FeedFilter.Folder -> loadFolderContent(filter.id)
+            FeedFilter.All -> loadAllFeedsContent()
+            else -> {
+                _currentFeedContent.value = null
+                _currentSelectedFolderId = null
+                _currentSelectedFeed = null
+            }
+        }
+    }
+
+    private fun loadAllFeedsContent() {
+        _currentSelectedFolderId = null
+        _currentSelectedFeed = null
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            try {
+                val content = repository.fetchMergedFeedContentForAll()
+                _currentFeedContent.value = content
+            } catch (e: Exception) {
+                _error.value = "すべてのフィードの読み込みに失敗しました: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
     
@@ -106,6 +133,36 @@ class HomeViewModel(
                 repository.deleteFeed(feed)
             } catch (e: Exception) {
                 _error.value = "削除に失敗しました: ${e.message}"
+            }
+        }
+    }
+    
+    fun deleteFolder(folder: FolderEntity) {
+        viewModelScope.launch {
+            try {
+                repository.deleteFolder(folder)
+            } catch (e: Exception) {
+                _error.value = "削除に失敗しました: ${e.message}"
+            }
+        }
+    }
+    
+    fun updateFeedTitle(feed: FeedEntity, newTitle: String) {
+        viewModelScope.launch {
+            try {
+                repository.updateFeed(feed.copy(title = newTitle))
+            } catch (e: Exception) {
+                _error.value = "タイトルの更新に失敗しました: ${e.message}"
+            }
+        }
+    }
+    
+    fun updateFolderName(folder: FolderEntity, newName: String) {
+        viewModelScope.launch {
+            try {
+                repository.updateFolder(folder.copy(name = newName))
+            } catch (e: Exception) {
+                _error.value = "フォルダ名の更新に失敗しました: ${e.message}"
             }
         }
     }
@@ -162,9 +219,21 @@ class HomeViewModel(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                repository.saveFeed(feed, urlToSave, folderId)
+                val savedFeed = repository.saveFeed(feed, urlToSave, folderId)
                 _foundFeed.value = null 
                 _targetUrl.value = ""
+                
+                if (folderId != null) {
+                    _currentSelectedFeed = null
+                    _currentSelectedFolderId = folderId
+                    val content = repository.fetchMergedFeedContent(folderId)
+                    _currentFeedContent.value = content
+                } else {
+                    // Immediately select the newly added feed
+                    _currentSelectedFeed = savedFeed
+                    _currentSelectedFolderId = null
+                    _currentFeedContent.value = feed
+                }
             } catch (e: Exception) {
                 _error.value = "保存に失敗した...: ${e.message}"
             } finally {
@@ -199,10 +268,21 @@ class HomeViewModel(
         val feed = _currentSelectedFeed
         val folderId = _currentSelectedFolderId
         
-        if (feed != null) {
-            selectFeed(feed)
-        } else if (folderId != null) {
-            loadFolderContent(folderId)
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                if (feed != null) {
+                    val content = repository.fetchFeedContent(feed)
+                    _currentFeedContent.value = content
+                } else if (folderId != null) {
+                    val content = repository.fetchMergedFeedContent(folderId)
+                    _currentFeedContent.value = content
+                }
+            } catch (e: Exception) {
+                _error.value = "更新に失敗しました: ${e.message}"
+            } finally {
+                _isRefreshing.value = false
+            }
         }
     }
     
@@ -222,6 +302,10 @@ class HomeViewModel(
     
     fun setTimeZone(timeZoneId: String) {
         settingsRepository.setTimeZone(timeZoneId)
+    }
+
+    fun setUpdateInterval(interval: Int) {
+        settingsRepository.setUpdateInterval(interval)
     }
     
     fun openNotificationSettings(feed: FeedEntity) {
@@ -246,7 +330,6 @@ class HomeViewModel(
     }
     
     fun formatDate(dateString: String, timeZoneId: String): String {
-        // Try common formats
         val parseFormats = listOf(
             "EEE, dd MMM yyyy HH:mm:ss zzz",
             "EEE, dd MMM yyyy HH:mm:ss Z",
@@ -263,7 +346,7 @@ class HomeViewModel(
             } catch (e: Exception) { }
         }
         
-        if (date == null) return dateString // パース失敗時はそのまま
+        if (date == null) return dateString
         
         val outputFormat = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
         outputFormat.timeZone = TimeZone.getTimeZone(timeZoneId)
