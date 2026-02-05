@@ -547,6 +547,9 @@ fun AdBanner() {
         factory = { context ->
             AdView(context).apply {
                 setAdSize(AdSize.BANNER)
+                // AdMob 管理画面（https://apps.admob.com/）で作成した広告ユニット ID を設定します。
+                // テスト用のサンプル ID: ca-app-pub-3940256098942544/6300978111
+                // https://developers.google.com/admob/android/test-ads
                 adUnitId = "ca-app-pub-3940256098942544/6300978111" // Test ID
                 loadAd(AdRequest.Builder().build())
             }
