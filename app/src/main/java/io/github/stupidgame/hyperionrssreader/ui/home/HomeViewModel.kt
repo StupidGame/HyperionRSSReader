@@ -82,8 +82,31 @@ class HomeViewModel(
 
     fun setFilter(filter: FeedFilter) {
         _currentFilter.value = filter
-        if (filter is FeedFilter.Folder) {
-            loadFolderContent(filter.id)
+        when (filter) {
+            is FeedFilter.Folder -> loadFolderContent(filter.id)
+            FeedFilter.All -> loadAllFeedsContent()
+            else -> {
+                _currentFeedContent.value = null
+                _currentSelectedFolderId = null
+                _currentSelectedFeed = null
+            }
+        }
+    }
+
+    private fun loadAllFeedsContent() {
+        _currentSelectedFolderId = null
+        _currentSelectedFeed = null
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            try {
+                val content = repository.fetchMergedFeedContentForAll()
+                _currentFeedContent.value = content
+            } catch (e: Exception) {
+                _error.value = "すべてのフィードの読み込みに失敗しました: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
     
