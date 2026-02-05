@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -44,6 +45,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.MobileAds
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
 import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 import io.github.stupidgame.hyperionrssreader.data.local.RssDatabase
@@ -67,6 +72,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        MobileAds.initialize(this) {}
 
         setContent {
             val context = LocalContext.current
@@ -383,6 +389,7 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
                         )
                     }
                 }
+                AdBanner()
             }
         }
     }
@@ -531,6 +538,20 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
             }
         )
     }
+}
+
+@Composable
+fun AdBanner() {
+    AndroidView(
+        modifier = Modifier.fillMaxWidth(),
+        factory = { context ->
+            AdView(context).apply {
+                setAdSize(AdSize.BANNER)
+                adUnitId = "ca-app-pub-3940256098942544/6300978111" // Test ID
+                loadAd(AdRequest.Builder().build())
+            }
+        }
+    )
 }
 
 @Composable
