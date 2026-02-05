@@ -375,7 +375,7 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
                                 onItemClick = { url ->
                                     try {
                                         uriHandler.openUri(url)
-                                    } catch (e: Exception) {
+                                    } catch (_: Exception) {
                                     }
                                 }
                             )
