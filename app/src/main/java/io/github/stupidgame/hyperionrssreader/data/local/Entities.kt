@@ -23,9 +23,11 @@ data class FolderEntity(
 )
 data class FeedEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val url: String,
+    val url: String, // User provided URL or Display URL
+    val rssUrl: String, // Actual RSS Endpoint URL
     val title: String,
     val description: String? = null,
     val folderId: Int? = null,
-    val notificationEnabled: Boolean = true
+    val notificationEnabled: Boolean = true,
+    val lastUpdated: Long = 0
 )

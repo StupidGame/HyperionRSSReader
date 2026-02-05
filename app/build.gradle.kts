@@ -19,13 +19,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = File(System.getenv("HYPERION_KEY_PATH")) // 君が生成した鍵ストアファイルのパス
+            storePassword = System.getenv("KEYSTORE_PASSWORD") // 環境変数から読み込むことを推奨
+            keyAlias = "hyperion" // 鍵のエイリアス
+            keyPassword = System.getenv("KEY_PASSWORD") // 環境変数から読み込むことを推奨
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -34,6 +41,17 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+
+    // 新しいGradle DSLでAPKファイル名を指定する
+    applicationVariants.all {
+        if (buildType.name == "release") {
+            outputs.all { 
+                // 明示的にApkVariantOutputとして扱う
+                val apkOutput = this as? com.android.build.gradle.api.ApkVariantOutput
+                apkOutput?.outputFileName = "Hyperion RSS Reader.apk"
+            }
+        }
     }
 }
 
@@ -53,6 +71,9 @@ dependencies {
     implementation("androidx.room:room-runtime:$room_version")
     implementation("androidx.room:room-ktx:$room_version")
     ksp("androidx.room:room-compiler:$room_version")
+    
+    // WorkManager for background updates
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

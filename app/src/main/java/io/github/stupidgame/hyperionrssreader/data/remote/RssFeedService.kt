@@ -5,6 +5,11 @@ import okhttp3.Request
 import java.io.IOException
 import java.net.URL
 
+data class RssCandidate(
+    val title: String,
+    val url: String
+)
+
 class RssFeedService(
     private val okHttpClient: OkHttpClient,
     private val rssFeedParser: RssFeedParser
@@ -12,35 +17,52 @@ class RssFeedService(
 
     @Throws(IOException::class)
     fun fetchRssFeed(feedUrl: String): RssFeed {
-        // まずコンテンツを文字列として取得する
-        val (content, _) = fetchContent(feedUrl)
-
+        // コンテンツ取得
+        val (content, contentType) = fetchContent(feedUrl)
+        
+        // そのままRSSとしてパースを試みる
         return try {
-            // そのままRSSとしてパースを試みる
-            rssFeedParser.parse(content.byteInputStream(), feedUrl)
+             rssFeedParser.parse(content.byteInputStream(), feedUrl)
         } catch (e: Exception) {
-            // パースに失敗した場合（HTMLだった場合など）、HTML内からRSSリンクを探す
-            val discoveredUrl = findRssLink(content, feedUrl)
+            val discoveredCandidates = findRssCandidates(content, feedUrl)
+            val bestCandidate = discoveredCandidates.firstOrNull()
             
-            if (discoveredUrl != null && discoveredUrl != feedUrl) {
-                // RSSリンクが見つかったら、そのURLで再度取得・パースを試みる
-                val (newContent, _) = fetchContent(discoveredUrl)
+            if (bestCandidate != null && bestCandidate.url != feedUrl) {
+                val (newContent, _) = fetchContent(bestCandidate.url)
                 try {
-                    rssFeedParser.parse(newContent.byteInputStream(), discoveredUrl)
+                    rssFeedParser.parse(newContent.byteInputStream(), bestCandidate.url)
                 } catch (e2: Exception) {
-                    // 見つけたURLでもダメなら、最初のエラーを投げる（もしくはe2でもいいが、大元の原因の方が分かりやすい場合も）
                     throw e
                 }
             } else {
-                // RSSリンクが見つからなければ、元のエラーを投げる
                 throw e
             }
+        }
+    }
+
+    // URLからRSSの候補を探すメソッド
+    fun getRssCandidates(url: String): List<RssCandidate> {
+        val (content, contentType) = try {
+             fetchContent(url)
+        } catch (e: Exception) {
+            return emptyList()
+        }
+
+        // まず、そのURL自体がRSSかどうかチェック
+        try {
+            rssFeedParser.parse(content.byteInputStream(), url)
+            // パース成功なら、そのURL自体が唯一の候補
+            return listOf(RssCandidate("Direct Feed", url))
+        } catch (e: Exception) {
+            // 失敗ならHTMLとしてリンク探索
+            return findRssCandidates(content, url)
         }
     }
 
     private fun fetchContent(url: String): Pair<String, String?> {
         val request = Request.Builder()
             .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")
             .build()
 
         okHttpClient.newCall(request).execute().use { response ->
@@ -50,30 +72,71 @@ class RssFeedService(
         }
     }
 
-    private fun findRssLink(html: String, baseUrl: String): String? {
+    private fun findRssCandidates(html: String, baseUrl: String): List<RssCandidate> {
+        val candidates = mutableListOf<RssCandidate>()
+        
         // <link>タグを探す正規表現
         val linkTagRegex = "<link\\s+([^>]+)>".toRegex(RegexOption.IGNORE_CASE)
         val matches = linkTagRegex.findAll(html)
         
         for (match in matches) {
             val attributes = match.groupValues[1]
-            // type="application/rss+xml" が含まれているか確認
-            if (attributes.contains("application/rss+xml", ignoreCase = true)) {
-                // href属性の値を抽出
+            // RSSまたはAtomを検出
+            if (attributes.contains("application/rss+xml", ignoreCase = true) || 
+                attributes.contains("application/atom+xml", ignoreCase = true)) {
+                
                 val hrefRegex = "href=[\"']([^\"']+)[\"']".toRegex(RegexOption.IGNORE_CASE)
+                val titleRegex = "title=[\"']([^\"']+)[\"']".toRegex(RegexOption.IGNORE_CASE)
+                
                 val hrefMatch = hrefRegex.find(attributes)
+                val titleMatch = titleRegex.find(attributes)
                 
                 if (hrefMatch != null) {
                     val link = hrefMatch.groupValues[1]
-                    // 相対URLを絶対URLに変換
-                    return try {
-                        URL(URL(baseUrl), link).toString()
+                    val title = titleMatch?.groupValues?.get(1) ?: "Unknown Feed"
+                    
+                    try {
+                        // 相対パスを絶対パスに変換
+                        val absoluteUrl = URL(URL(baseUrl), link).toString()
+                        candidates.add(RssCandidate(title, absoluteUrl))
                     } catch (e: Exception) {
-                        null
+                        // ignore invalid URL
                     }
                 }
             }
         }
-        return null
+        
+        // <a>タグからのリンク探索も追加（RSSアイコンなどからのリンク用）
+        // 単純にhrefが .rss, .xml, .atom で終わるもの、またはURLに 'rss', 'feed' が含まれるものを探す
+        // これは精度を下げる可能性もあるが、<link>タグがないサイトに対応するため
+        val aTagRegex = "<a\\s+([^>]+)>".toRegex(RegexOption.IGNORE_CASE)
+        val aMatches = aTagRegex.findAll(html)
+        
+        for (match in aMatches) {
+            val attributes = match.groupValues[1]
+            val hrefRegex = "href=[\"']([^\"']+)[\"']".toRegex(RegexOption.IGNORE_CASE)
+            val hrefMatch = hrefRegex.find(attributes)
+            
+            if (hrefMatch != null) {
+                val link = hrefMatch.groupValues[1]
+                if (link.contains("rss", ignoreCase = true) || 
+                    link.contains("feed", ignoreCase = true) || 
+                    link.endsWith(".xml", ignoreCase = true)) {
+                    
+                    try {
+                        val absoluteUrl = URL(URL(baseUrl), link).toString()
+                        // 既に候補にあるかチェック
+                        if (candidates.none { it.url == absoluteUrl }) {
+                            // タイトルがない場合はURLの一部を使うか、仮のタイトル
+                            val title = "Possible Feed ($link)"
+                            candidates.add(RssCandidate(title, absoluteUrl))
+                        }
+                    } catch (e: Exception) {
+                    }
+                }
+            }
+        }
+
+        return candidates.distinctBy { it.url }
     }
 }
