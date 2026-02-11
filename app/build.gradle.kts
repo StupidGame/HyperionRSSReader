@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.stupidgame.hyperionrssreader"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.5"
+        versionCode = 1
+        versionName = "1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -34,6 +34,9 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
+        debug {
+            applicationIdSuffix = ".debug"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
@@ -43,11 +46,15 @@ android {
         compose = true
     }
 
-    // 新しいGradle DSLでAPKファイル名を指定する
+    packaging {
+        resources {
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
     applicationVariants.all {
         if (buildType.name == "release") {
-            outputs.all { 
-                // 明示的にApkVariantOutputとして扱う
+            outputs.all {
                 val apkOutput = this as? com.android.build.gradle.api.ApkVariantOutput
                 apkOutput?.outputFileName = "Hyperion RSS Reader.apk"
             }
