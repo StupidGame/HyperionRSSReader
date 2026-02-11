@@ -80,6 +80,10 @@ class HomeViewModel(
     private val _targetUrl = MutableStateFlow<String>("")
     val targetUrl: StateFlow<String> = _targetUrl.asStateFlow()
 
+    init {
+        setFilter(FeedFilter.All)
+    }
+
     fun setFilter(filter: FeedFilter) {
         _currentFilter.value = filter
         when (filter) {
