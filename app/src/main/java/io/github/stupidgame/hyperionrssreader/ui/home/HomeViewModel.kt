@@ -80,6 +80,10 @@ class HomeViewModel(
     private val _targetUrl = MutableStateFlow<String>("")
     val targetUrl: StateFlow<String> = _targetUrl.asStateFlow()
 
+    init {
+        setFilter(FeedFilter.All)
+    }
+
     fun setFilter(filter: FeedFilter) {
         _currentFilter.value = filter
         when (filter) {
@@ -277,6 +281,9 @@ class HomeViewModel(
                 } else if (folderId != null) {
                     val content = repository.fetchMergedFeedContent(folderId)
                     _currentFeedContent.value = content
+                } else {
+                    val content = repository.fetchMergedFeedContentForAll()
+                    _currentFeedContent.value = content
                 }
             } catch (e: Exception) {
                 _error.value = "更新に失敗しました: ${e.message}"
@@ -334,7 +341,7 @@ class HomeViewModel(
             "EEE, dd MMM yyyy HH:mm:ss zzz",
             "EEE, dd MMM yyyy HH:mm:ss Z",
             "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ssZ"
+            "yyyy-MM-dd'T'HH:mm:ssZ'"
         )
         
         var date: Date? = null
