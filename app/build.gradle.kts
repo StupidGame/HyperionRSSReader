@@ -73,7 +73,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.android.gms:play-services-ads:24.9.0")
     implementation("org.jsoup:jsoup:1.22.1")
     implementation("com.prof18.rssparser:rssparser:6.1.3")
     
