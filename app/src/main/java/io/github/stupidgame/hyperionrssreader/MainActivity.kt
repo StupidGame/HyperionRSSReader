@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -45,10 +45,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
-import com.google.android.gms.ads.MobileAds
+
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
 import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 import io.github.stupidgame.hyperionrssreader.data.local.RssDatabase
@@ -72,7 +69,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        MobileAds.initialize(this) {}
 
         setContent {
             val context = LocalContext.current
@@ -366,7 +362,14 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
                             isRefreshing = isRefreshing,
                             onRefresh = { homeViewModel.refreshCurrentFeed() },
                             state = pullRefreshState,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            indicator = {
+                                PullToRefreshDefaults.Indicator(
+                                    modifier = Modifier.align(Alignment.TopCenter),
+                                    state = pullRefreshState,
+                                    isRefreshing = isRefreshing
+                                )
+                            }
                         ) {
                             FeedContent(
                                 rssFeed = currentFeedContent!!,
@@ -389,7 +392,6 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
                         )
                     }
                 }
-                AdBanner()
             }
         }
     }
@@ -540,22 +542,6 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
     }
 }
 
-@Composable
-fun AdBanner() {
-    AndroidView(
-        modifier = Modifier.fillMaxWidth(),
-        factory = { context ->
-            AdView(context).apply {
-                setAdSize(AdSize.BANNER)
-                // AdMob 管理画面（https://apps.admob.com/）で作成した広告ユニット ID を設定します。
-                // テスト用のサンプル ID: ca-app-pub-3940256098942544/6300978111
-                // https://developers.google.com/admob/android/test-ads
-                adUnitId = "ca-app-pub-3940256098942544/6300978111" // Test ID
-                loadAd(AdRequest.Builder().build())
-            }
-        }
-    )
-}
 
 @Composable
 fun EditTitleDialog(
