@@ -65,6 +65,7 @@ android {
         resources.excludes.add("META-INF/INDEX.LIST")
         resources.excludes.add("META-INF/groovy/org.codehaus.groovy.runtime.ExtensionModule")
         resources.excludes.add("META-INF/groovy-release-info.properties")
+        resources.excludes.add("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
     }
 }
 
