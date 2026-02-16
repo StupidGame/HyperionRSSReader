@@ -21,10 +21,21 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("HYPERION_KEY_PATH")) // 君が生成した鍵ストアファイルのパス
-            storePassword = System.getenv("KEYSTORE_PASSWORD") // 環境変数から読み込むことを推奨
-            keyAlias = "hyperion" // 鍵のエイリアス
-            keyPassword = System.getenv("KEY_PASSWORD") // 環境変数から読み込むことを推奨
+            val ksPath = System.getenv("HYPERION_KEY_PATH")
+            val ksPass = System.getenv("KEYSTORE_PASSWORD")
+            val keyAl  = "calyendar"
+            val keyPass= System.getenv("KEY_PASSWORD")
+
+            // 環境変数が揃っている時だけ設定（ローカル開発で未設定でもビルドできるように）
+            if (!ksPath.isNullOrBlank() && !ksPass.isNullOrBlank() && !keyAl.isNullOrBlank() && !keyPass.isNullOrBlank()) {
+                storeFile = file(ksPath)
+                storePassword = ksPass
+                keyAlias = keyAl
+                keyPassword = keyPass
+            } else {
+                // 未設定なら release 署名は設定されません（CI等で環境変数を入れてください）
+                logger.warn("Release signing env vars are missing. APK will be unsigned or use default behavior.")
+            }
         }
     }
 
