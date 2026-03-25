@@ -539,6 +539,7 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
             onTimeZoneSelected = {
                 homeViewModel.setTimeZone(it)
             },
+
             onUpdateIntervalChanged = {
                 homeViewModel.setUpdateInterval(it)
             },

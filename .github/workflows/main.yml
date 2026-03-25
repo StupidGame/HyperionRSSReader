@@ -3,6 +3,9 @@ name: Build Release APK
 on:
   workflow_dispatch:
 
+env:
+  ARTIFACT_NAME: CalYendar-release-signed.apk
+
 jobs:
   build:
     runs-on: ubuntu-latest
