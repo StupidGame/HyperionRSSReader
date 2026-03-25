@@ -66,6 +66,8 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
+    private val notificationHelper by lazy { NotificationHelper(applicationContext) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -140,6 +142,11 @@ class MainActivity : ComponentActivity() {
                 HomeScreen(homeViewModel = homeViewModel, updateInterval = updateInterval)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        notificationHelper.clearAllNotifications()
     }
 }
 
