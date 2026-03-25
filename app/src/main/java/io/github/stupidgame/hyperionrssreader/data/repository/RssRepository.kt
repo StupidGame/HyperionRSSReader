@@ -135,6 +135,41 @@ class RssRepository(
             rssFeedService.fetchRssFeed(feed.rssUrl)
         }
     }
+
+    suspend fun fetchMergedFeedContentForAll(): RssFeed {
+        return withContext(Dispatchers.IO) {
+            val feeds = getAllFeedsSync()
+            if (feeds.isEmpty()) {
+                return@withContext RssFeed("", RssChannel("All Feeds", "", "No feeds subscribed", emptyList()))
+            }
+
+            val deferredResults = feeds.map { feed ->
+                async {
+                    try {
+                        rssFeedService.fetchRssFeed(feed.rssUrl)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
+
+            val results = deferredResults.awaitAll().filterNotNull()
+
+            val allItems = results.flatMap { it.channel.items }
+                .distinctBy { it.link }
+                .sortedByDescending { parsePubDate(it.pubDate) }
+
+            RssFeed(
+                url = "all-feeds",
+                channel = RssChannel(
+                    title = "All Feeds",
+                    link = "",
+                    description = "Merged feed for all subscribed feeds. Contains ${feeds.size} feeds.",
+                    items = allItems
+                )
+            )
+        }
+    }
     
     suspend fun fetchMergedFeedContent(folderId: Int): RssFeed {
         return withContext(Dispatchers.IO) {

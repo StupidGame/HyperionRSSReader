@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +45,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+
 import io.github.stupidgame.hyperionrssreader.data.local.FeedEntity
 import io.github.stupidgame.hyperionrssreader.data.local.FolderEntity
 import io.github.stupidgame.hyperionrssreader.data.local.RssDatabase
@@ -360,7 +362,14 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
                             isRefreshing = isRefreshing,
                             onRefresh = { homeViewModel.refreshCurrentFeed() },
                             state = pullRefreshState,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            indicator = {
+                                PullToRefreshDefaults.Indicator(
+                                    modifier = Modifier.align(Alignment.TopCenter),
+                                    state = pullRefreshState,
+                                    isRefreshing = isRefreshing
+                                )
+                            }
                         ) {
                             FeedContent(
                                 rssFeed = currentFeedContent!!,
@@ -369,7 +378,7 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
                                 onItemClick = { url ->
                                     try {
                                         uriHandler.openUri(url)
-                                    } catch (e: Exception) {
+                                    } catch (_: Exception) {
                                     }
                                 }
                             )
@@ -531,6 +540,38 @@ fun HomeScreen(homeViewModel: HomeViewModel, updateInterval: Int) {
             }
         )
     }
+}
+
+
+@Composable
+fun EditTitleDialog(
+    title: String,
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initialValue) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
