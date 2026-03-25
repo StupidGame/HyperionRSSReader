@@ -17,6 +17,10 @@ class NotificationHelper(context: Context) {
     private val context: Context = context.applicationContext
     private val notificationManager = this.context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+    fun clearAllNotifications() {
+        notificationManager.cancelAll()
+    }
+
     fun createChannelForFeed(feed: FeedEntity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channelId = getFeedChannelId(feed.id)
