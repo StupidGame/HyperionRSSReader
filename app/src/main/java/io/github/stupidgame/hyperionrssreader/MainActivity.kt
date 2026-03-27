@@ -582,37 +582,6 @@ fun EditTitleDialog(
 }
 
 @Composable
-fun EditTitleDialog(
-    title: String,
-    initialValue: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var text by remember { mutableStateOf(initialValue) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            TextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(text) }) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
 fun SelectCandidateDialog(
     candidates: List<RssCandidate>,
     onSelect: (RssCandidate) -> Unit,
